@@ -168,6 +168,7 @@
     <input class="search" id="search" type="search" placeholder="Search events, camps, descriptions…" autocomplete="off" />
     <div class="chips" id="typeChips"></div>
     <div class="chips" id="dayChips"></div>
+    <div class="chips" id="todChips"></div>
     <div class="countline" id="browseCount"></div>
     <div id="browseList"></div>
   </section>
@@ -175,6 +176,7 @@
   <!-- MY SCHEDULE -->
   <section id="mine" class="hide">
     <div class="countline" id="mineSummary"></div>
+    <div id="mineActions"></div>
     <div id="mineList"></div>
   </section>
 
@@ -238,7 +240,7 @@ const TYPES = {
 let EVENTS = [];                 // flattened
 let FAVS = new Set(load(LS.favs, []));
 let SETTINGS = load(LS.settings, { url: DEFAULT_URL });
-let filter = { type:"all", day:"all", q:"" };
+let filter = { type:"all", day:"all", timeOfDay:"all", q:"", now:false };
 
 /* ---------- storage helpers ---------- */
 function load(k, fb){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):fb; }catch(e){ return fb; } }
@@ -250,6 +252,28 @@ const esc = s => (s==null?"":String(s)).replace(/[&<>"']/g, c=>({ "&":"&amp;","<
 function toMin(t){ if(!t||!/^\d{1,2}:\d{2}$/.test(t)) return null; const [h,m]=t.split(":").map(Number); return h*60+m; }
 function idOf(e){ return `${e.ownerType}|${e.owner}|${e.day}|${e.startTime}|${e.title}`; }
 function dayIdx(d){ const i=DAY_ORDER.indexOf(d); return i<0?99:i; }
+const pad = n => String(n).padStart(2,"0");
+// Map each festival weekday to a real date in the *current* Thu→Mon window, so "Now" and
+// calendar export land on the right days no matter which day you open the app.
+function festivalDates(){
+  const base=new Date(); base.setHours(0,0,0,0);
+  const dow=base.getDay();                       // 0 Sun … 4 Thu … 6 Sat
+  let diff=4-dow; if(dow===0) diff=-3; if(dow===1) diff=-4;  // Sun/Mon belong to the Thu that just passed
+  const thu=new Date(base); thu.setDate(base.getDate()+diff);
+  const out={};
+  DAY_ORDER.forEach((n,i)=>{ const d=new Date(thu); d.setDate(thu.getDate()+i);
+    out[n]=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; });
+  return out;
+}
+const FESTIVAL_DATES = festivalDates();
+const TODAY_NAME = new Date().toLocaleDateString("en-US",{weekday:"long"});
+const TODAY = DAY_ORDER.includes(TODAY_NAME) ? TODAY_NAME : null;
+const nowMin = () => { const d=new Date(); return d.getHours()*60+d.getMinutes(); };
+function todBucket(min){ if(min==null) return null;
+  if(min>=300 && min<720)  return "morning";
+  if(min>=720 && min<1020) return "afternoon";
+  if(min>=1020 && min<1320) return "evening";
+  return "late"; }                               // 22:00–04:59
 let toastT;
 function toast(msg){ const el=document.getElementById("toast"); el.textContent=msg; el.classList.add("show");
   clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove("show"),2200); }
@@ -307,14 +331,23 @@ function applyData(json, origin){
 }
 
 /* ---------- rendering ---------- */
+function nowMatch(e){
+  if(!TODAY || e.day!==TODAY) return false;
+  const s=toMin(e.startTime); if(s==null) return false;
+  let en=toMin(e.endTime); if(en==null) en=s+60; if(e.crossesMidnight && en<=s) en+=1440;
+  const n=nowMin();
+  return s>=n || (s<=n && n<en);   // upcoming today, or happening right now
+}
 function matches(e){
   if(filter.type!=="all" && e.ownerType!==filter.type) return false;
-  if(filter.day!=="all" && e.day!==filter.day) return false;
   if(filter.q){
     const q=filter.q;
     const hay=(e.title+" "+e.owner+" "+e.description+" "+e.tags.join(" ")+" "+e.neighbourhood).toLowerCase();
     if(!hay.includes(q)) return false;
   }
+  if(filter.now) return nowMatch(e);
+  if(filter.day!=="all" && e.day!==filter.day) return false;
+  if(filter.timeOfDay!=="all" && todBucket(toMin(e.startTime))!==filter.timeOfDay) return false;
   return true;
 }
 
@@ -360,10 +393,18 @@ function renderBrowse(){
     document.getElementById("browseCount").textContent = "";
     return;
   }
+  if(filter.now && !TODAY){
+    document.getElementById("browseCount").textContent = "";
+    el.innerHTML = `<div class="empty"><div class="big">⏰</div><h3>Not a festival day</h3>
+      <p>The “Now” view lights up Thursday → Monday during the event. Pick a day above to browse.</p></div>`;
+    return;
+  }
   const list = EVENTS.filter(matches);
-  document.getElementById("browseCount").textContent =
-    `${list.length} event${list.length!==1?"s":""}${filter.type!=="all"?" · "+TYPES[filter.type].label:""}${filter.day!=="all"?" · "+filter.day:""}`;
-  if(!list.length){ el.innerHTML = `<div class="empty"><div class="big">🔍</div><h3>No matches</h3><p>Try a different filter or search.</p></div>`; return; }
+  const tod = filter.timeOfDay!=="all" ? " · "+(TOD.find(t=>t[0]===filter.timeOfDay)||["",""])[1] : "";
+  document.getElementById("browseCount").textContent = filter.now
+    ? `${list.length} happening now & next · ${TODAY}`
+    : `${list.length} event${list.length!==1?"s":""}${filter.type!=="all"?" · "+TYPES[filter.type].label:""}${filter.day!=="all"?" · "+filter.day:""}${tod}`;
+  if(!list.length){ el.innerHTML = `<div class="empty"><div class="big">${filter.now?"🌙":"🔍"}</div><h3>${filter.now?"Nothing left today":"No matches"}</h3><p>${filter.now?"Looks like you've reached the end of today's schedule.":"Try a different filter or search."}</p></div>`; return; }
   let html="";
   for(const g of groupByDay(list)){
     html += `<div class="day-h">${esc(g.day)}<span class="n">${g.items.length}</span></div>`;
@@ -389,6 +430,8 @@ function renderMine(){
   // fall back to stored favs that aren't in current data (still show them minimally)
   document.getElementById("mineSummary").textContent =
     list.length ? `${list.length} starred event${list.length!==1?"s":""} across your weekend` : "";
+  document.getElementById("mineActions").innerHTML =
+    list.length ? `<button class="btn ghost" id="icsBtn">📅 Add my schedule to phone calendar (.ics)</button>` : "";
   if(!FAVS.size){
     el.innerHTML = `<div class="empty"><div class="big">⭐</div><h3>No favourites yet</h3>
       <p>Tap the ☆ on any event in <b>Browse</b> to build your personal schedule here.</p></div>`;
@@ -420,13 +463,16 @@ function emptyData(){
 function renderAll(){ renderBrowse(); renderMine(); refreshCounts(); }
 
 /* ---------- chips ---------- */
+const TOD = [["morning","🌅 Morning"],["afternoon","☀️ Afternoon"],["evening","🌆 Evening"],["late","🌙 Late night"]];
 function buildChips(){
   const tc=document.getElementById("typeChips");
   tc.innerHTML = chip("type","all","All","",true) + Object.entries(TYPES)
     .map(([k,v])=>chip("type",k,v.short,v.color,false)).join("");
   const dc=document.getElementById("dayChips");
-  dc.innerHTML = chip("day","all","All days","",true) + DAY_ORDER
-    .map(d=>chip("day",d,DAY_SHORT[d],"",false)).join("");
+  dc.innerHTML = (TODAY?chip("now","now","⏰ Now","",false):"") + chip("day","all","All days","",true)
+    + DAY_ORDER.map(d=>chip("day",d,DAY_SHORT[d],"",false)).join("");
+  const od=document.getElementById("todChips");
+  od.innerHTML = chip("tod","all","Any time","",true) + TOD.map(([k,l])=>chip("tod",k,l,"",false)).join("");
 }
 function chip(kind,val,label,color,active){
   const sw = color?`<span class="swatch" style="background:${color}"></span>`:"";
@@ -472,7 +518,11 @@ function wire(){
 
   document.addEventListener("click",e=>{
     const chip=e.target.closest(".chip");
-    if(chip){ const k=chip.dataset.kind, v=chip.dataset.val; filter[k]=v;
+    if(chip){ const k=chip.dataset.kind, v=chip.dataset.val;
+      if(k==="now"){ filter.now=true; filter.day="all"; }
+      else if(k==="day"){ filter.now=false; filter.day=v; }
+      else if(k==="type"){ filter.type=v; }
+      else if(k==="tod"){ filter.timeOfDay=v; }
       chip.parentElement.querySelectorAll(".chip").forEach(c=>c.classList.toggle("active", c===chip));
       renderBrowse(); return; }
 
@@ -486,6 +536,8 @@ function wire(){
       });
       if(!document.getElementById("mine").classList.contains("hide")) renderMine();
       return; }
+
+    if(e.target.closest("#icsBtn")){ exportICS(); return; }
 
     const ev=e.target.closest(".ev");
     if(ev && !e.target.closest("button")){ ev.classList.toggle("open");
@@ -525,6 +577,46 @@ function importFavs(){
       catch(err){ toast("Bad file: "+err.message); } };
     r.readAsText(f); };
   inp.click();
+}
+
+/* ---------- calendar (.ics) export ---------- */
+function icsEsc(s){ return String(s==null?"":s).replace(/\\/g,"\\\\").replace(/;/g,"\\;").replace(/,/g,"\\,").replace(/\r?\n/g,"\\n"); }
+function icsFold(line){ let out=""; while(line.length>73){ out+=line.slice(0,73)+"\r\n "; line=line.slice(73); } return out+line; }
+function icsStamp(date, min){            // date "YYYY-MM-DD", min from midnight → floating local "YYYYMMDDTHHMMSS"
+  const [Y,M,D]=date.split("-").map(Number);
+  const dt=new Date(Y, M-1, D, 0, 0, 0); dt.setMinutes(dt.getMinutes()+min);
+  return `${dt.getFullYear()}${pad(dt.getMonth()+1)}${pad(dt.getDate())}T${pad(dt.getHours())}${pad(dt.getMinutes())}00`;
+}
+function exportICS(){
+  const favs=EVENTS.filter(e=>FAVS.has(idOf(e)));
+  const dated=favs.filter(e=>FESTIVAL_DATES[e.day] && toMin(e.startTime)!=null);
+  if(!dated.length){ toast("No favourites with known times to export"); return; }
+  const now=new Date();
+  const stamp=`${now.getUTCFullYear()}${pad(now.getUTCMonth()+1)}${pad(now.getUTCDate())}T${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}Z`;
+  const L=["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Otherworld Planner//EN","CALSCALE:GREGORIAN","METHOD:PUBLISH","X-WR-CALNAME:Otherworld 2026"];
+  for(const e of dated){
+    const date=FESTIVAL_DATES[e.day], s=toMin(e.startTime);
+    let en=toMin(e.endTime); if(en==null) en=s+60; if(e.crossesMidnight && en<=s) en+=1440; if(en<=s) en=s+60;
+    const t=TYPES[e.ownerType]||{label:e.ownerType};
+    const loc=[e.owner,e.neighbourhood].filter(Boolean).join(" · ");
+    const desc=[`${t.label||t.short||""} — ${e.owner}`, e.description].filter(Boolean).join("\n\n");
+    L.push("BEGIN:VEVENT");
+    L.push("UID:"+icsEsc(idOf(e)).replace(/\s+/g,"-").slice(0,140)+"@otherworld-planner");
+    L.push("DTSTAMP:"+stamp);
+    L.push("DTSTART:"+icsStamp(date,s));
+    L.push("DTEND:"+icsStamp(date,en));
+    L.push(icsFold("SUMMARY:"+icsEsc(e.title)));
+    if(loc)  L.push(icsFold("LOCATION:"+icsEsc(loc)));
+    if(desc) L.push(icsFold("DESCRIPTION:"+icsEsc(desc)));
+    L.push("BEGIN:VALARM","TRIGGER:-PT30M","ACTION:DISPLAY",icsFold("DESCRIPTION:"+icsEsc(e.title)),"END:VALARM");
+    L.push("END:VEVENT");
+  }
+  L.push("END:VCALENDAR");
+  const blob=new Blob([L.join("\r\n")],{type:"text/calendar;charset=utf-8"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+  a.download="otherworld-2026.ics"; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  const skipped=favs.length-dated.length;
+  toast(`Exported ${dated.length} event${dated.length!==1?"s":""}${skipped?` (${skipped} without times skipped)`:""}`);
 }
 
 /* ---------- boot ---------- */
