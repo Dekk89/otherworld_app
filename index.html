@@ -139,6 +139,38 @@
     font-size:13px;opacity:0;pointer-events:none;transition:.25s;z-index:60;max-width:90vw;text-align:center}
   #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
   .hide{display:none!important}
+
+  /* ---- category select ---- */
+  .filterbar{display:flex;gap:8px;padding:8px 2px 0}
+  .tagsel{flex:1;background:var(--card);border:1px solid var(--line);color:var(--text);
+    border-radius:12px;padding:10px 12px;font-size:14px;font-weight:600;appearance:none;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%239a93c7' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:right 14px center}
+
+  /* ---- "on now" badge ---- */
+  .nowbadge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;color:#fff;
+    background:linear-gradient(135deg,#ef4444,#f97316);padding:2px 8px;border-radius:999px}
+  .nowbadge .live{width:6px;height:6px;border-radius:50%;background:#fff;animation:pulse 1.4s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+  .ev .end{color:var(--faint);font-weight:600}
+
+  /* ---- camps directory ---- */
+  .camp{background:var(--card);border:1px solid var(--line);border-radius:14px;margin-bottom:10px;
+    overflow:hidden;position:relative}
+  .camp::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--type-c,#666)}
+  .camp-head{display:flex;align-items:center;gap:10px;padding:13px 12px 13px 14px;cursor:pointer}
+  .camp-ic{font-size:18px}
+  .camp-main{flex:1;min-width:0}
+  .camp-name{font-weight:650;font-size:15px;line-height:1.25}
+  .camp-sub{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:3px;font-size:12px;color:var(--muted)}
+  .camp-cnt{font-variant-numeric:tabular-nums;font-size:12px;font-weight:700;color:var(--muted);
+    background:#ffffff10;border:1px solid var(--line);border-radius:999px;padding:2px 9px;white-space:nowrap}
+  .camp-chev{color:var(--faint);font-size:13px;transition:transform .2s}
+  .camp.open .camp-chev{transform:rotate(90deg)}
+  .camp-events{display:none;padding:0 10px 8px}
+  .camp.open .camp-events{display:block}
+  .camp-events .ev{background:var(--card2)}
+  .muted-note{color:var(--faint);font-size:13px;padding:6px 4px 12px}
 </style>
 </head>
 <body>
@@ -158,8 +190,9 @@
 
 <nav class="tabs">
   <button data-tab="browse" class="active">🔭 Browse</button>
-  <button data-tab="mine">⭐ My Schedule <span class="badge hide" id="mineCount">0</span></button>
-  <button data-tab="settings">⚙︎ Settings</button>
+  <button data-tab="camps">🏕️ Camps</button>
+  <button data-tab="mine">⭐ Mine <span class="badge hide" id="mineCount">0</span></button>
+  <button data-tab="settings">⚙︎</button>
 </nav>
 
 <main>
@@ -169,8 +202,17 @@
     <div class="chips" id="typeChips"></div>
     <div class="chips" id="dayChips"></div>
     <div class="chips" id="todChips"></div>
+    <div class="filterbar"><select class="tagsel" id="tagSel"><option value="all">All categories</option></select></div>
     <div class="countline" id="browseCount"></div>
     <div id="browseList"></div>
+  </section>
+
+  <!-- CAMPS -->
+  <section id="camps" class="hide">
+    <input class="search" id="campSearch" type="search" placeholder="Search camps, stages, art, vehicles…" autocomplete="off" />
+    <div class="chips" id="campTypeChips"></div>
+    <div class="countline" id="campCount"></div>
+    <div id="campList"></div>
   </section>
 
   <!-- MY SCHEDULE -->
@@ -237,10 +279,12 @@ const TYPES = {
 };
 
 /* ---------- state ---------- */
-let EVENTS = [];                 // flattened
+let EVENTS = [];                 // flattened events
+let ENTRIES = [];                // camps / stages / art / vehicles (each with .events)
 let FAVS = new Set(load(LS.favs, []));
 let SETTINGS = load(LS.settings, { url: DEFAULT_URL });
-let filter = { type:"all", day:"all", timeOfDay:"all", q:"", now:false };
+let filter = { type:"all", day:"all", timeOfDay:"all", tag:"all", q:"", now:false };
+let campFilter = { type:"all", q:"" };
 
 /* ---------- storage helpers ---------- */
 function load(k, fb){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):fb; }catch(e){ return fb; } }
@@ -253,6 +297,22 @@ function toMin(t){ if(!t||!/^\d{1,2}:\d{2}$/.test(t)) return null; const [h,m]=t
 function idOf(e){ return `${e.ownerType}|${e.owner}|${e.day}|${e.startTime}|${e.title}`; }
 function dayIdx(d){ const i=DAY_ORDER.indexOf(d); return i<0?99:i; }
 const pad = n => String(n).padStart(2,"0");
+// Normalise sloppy source times: "1200"→"12:00", "900"→"09:00", "9:00"→"09:00".
+function normTime(t){ if(!t) return ""; t=String(t).trim();
+  if(/^\d{1,2}:\d{2}$/.test(t)){ const [h,m]=t.split(":"); return pad(+h)+":"+m; }
+  const m=t.match(/^(\d{1,2})(\d{2})$/); return m ? pad(+m[1])+":"+m[2] : t; }
+// Derive timing from the actual start/end — the source's crossesMidnight flag is unreliable.
+function timeInfo(e){
+  const s=toMin(e.startTime); let en=toMin(e.endTime); let hasEnd=en!=null, endsNextDay=false;
+  if(s!=null && en!=null){ if(en<s) endsNextDay=true; else if(en===s){ hasEnd=false; en=null; } }
+  const endAbs = !hasEnd ? (s==null?null:s+60) : (endsNextDay?en+1440:en);
+  return { s, en, hasEnd, endsNextDay, endAbs };
+}
+function isOnNow(e){
+  if(!TODAY || e.day!==TODAY) return false;
+  const ti=timeInfo(e); if(ti.s==null) return false;
+  const n=nowMin(); return ti.s<=n && n<ti.endAbs;
+}
 // Map each festival weekday to a real date in the *current* Thu→Mon window, so "Now" and
 // calendar export land on the right days no matter which day you open the app.
 function festivalDates(){
@@ -279,31 +339,36 @@ function toast(msg){ const el=document.getElementById("toast"); el.textContent=m
   clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove("show"),2200); }
 
 /* ---------- data ingest ---------- */
+const byTime = (a,b)=> dayIdx(a.day)-dayIdx(b.day) || (toMin(a.startTime)??1e9)-(toMin(b.startTime)??1e9) || a.title.localeCompare(b.title);
 function ingest(json){
   const entries = (json && json.entries) || [];
-  const flat = [];
+  const norm = [];
   for(const en of entries){
     const claimed = !!en.claimed;
+    const evs = [];
     for(const e of (en.events||[])){
       if(!e || !e.title) continue;
-      flat.push({
+      evs.push({
         owner: e.owner || en.name,
         ownerType: e.ownerType || en.type || "camp",
         title: e.title,
         description: e.description || "",
         day: e.day || "",
-        startTime: e.startTime || "",
-        endTime: e.endTime || "",
-        crossesMidnight: !!e.crossesMidnight,
+        startTime: normTime(e.startTime),
+        endTime: normTime(e.endTime),
         tags: Array.isArray(e.tags)?e.tags:[],
         claimed,
         neighbourhood: en.neighbourhood || "",
       });
     }
+    evs.sort(byTime);
+    norm.push({ name: en.name||"(unnamed)", type: en.type||"camp", neighbourhood: en.neighbourhood||"", claimed, events: evs });
   }
-  flat.sort((a,b)=> dayIdx(a.day)-dayIdx(b.day) || (toMin(a.startTime)??1e9)-(toMin(b.startTime)??1e9) || a.title.localeCompare(b.title));
-  EVENTS = flat;
-  return { count: flat.length, sourceUpdated: json && json.metadata && (json.metadata.lastReconciledAt || json.metadata.extractedAt) };
+  norm.sort((a,b)=> a.name.localeCompare(b.name, undefined, {sensitivity:"base"}));
+  norm.forEach((en,i)=> en._i=i);
+  ENTRIES = norm;
+  EVENTS = norm.flatMap(en=>en.events).sort(byTime);
+  return { count: EVENTS.length, sourceUpdated: json && json.metadata && (json.metadata.lastReconciledAt || json.metadata.extractedAt) };
 }
 
 async function fetchData(manual){
@@ -333,17 +398,16 @@ function applyData(json, origin){
 /* ---------- rendering ---------- */
 function nowMatch(e){
   if(!TODAY || e.day!==TODAY) return false;
-  const s=toMin(e.startTime); if(s==null) return false;
-  let en=toMin(e.endTime); if(en==null) en=s+60; if(e.crossesMidnight && en<=s) en+=1440;
+  const ti=timeInfo(e); if(ti.s==null) return false;
   const n=nowMin();
-  return s>=n || (s<=n && n<en);   // upcoming today, or happening right now
+  return ti.s>=n || (ti.s<=n && n<ti.endAbs);   // upcoming today, or happening right now
 }
 function matches(e){
   if(filter.type!=="all" && e.ownerType!==filter.type) return false;
-  if(filter.q){
-    const q=filter.q;
+  if(filter.tag!=="all" && !e.tags.includes(filter.tag)) return false;
+  if(filter.q){                                  // search spans the whole schedule (ignores day/time)
     const hay=(e.title+" "+e.owner+" "+e.description+" "+e.tags.join(" ")+" "+e.neighbourhood).toLowerCase();
-    if(!hay.includes(q)) return false;
+    return hay.includes(filter.q);
   }
   if(filter.now) return nowMatch(e);
   if(filter.day!=="all" && e.day!==filter.day) return false;
@@ -355,9 +419,10 @@ function eventCard(e, extra){
   const t = TYPES[e.ownerType] || { short:e.ownerType, icon:"•", color:"#888" };
   const id = idOf(e);
   const on = FAVS.has(id);
-  const plus = e.crossesMidnight ? '<span class="plus">+1</span>' : '';
-  const time = e.startTime ? `${esc(e.startTime)}${e.endTime?`<br><span style="color:var(--faint);font-weight:600">${esc(e.endTime)}${plus}</span>`:''}` : "—";
+  const ti = timeInfo(e);
+  const time = ti.s==null ? "—" : `${esc(e.startTime)}${ti.hasEnd?`<br><span class="end">${esc(e.endTime)}${ti.endsNextDay?'<span class="plus">+1</span>':''}</span>`:''}`;
   const tags = e.tags.slice(0,6).map(t=>`<span class="tag">${esc(t)}</span>`).join("");
+  const nowB = isOnNow(e) ? `<span class="nowbadge"><span class="live"></span>now</span>` : "";
   const verified = e.claimed ? `<span class="verified">✓ Verified</span>` : "";
   const hasDesc = e.description && e.description.length>0;
   return `<div class="ev" data-id="${esc(id)}" style="--type-c:${t.color};--type-bg:${t.color}22">
@@ -366,6 +431,7 @@ function eventCard(e, extra){
       <div class="body">
         <div class="title">${esc(e.title)}</div>
         <div class="meta">
+          ${nowB}
           <span class="tp" style="--type-c:${t.color};--type-bg:${t.color}22">${t.icon} ${esc(t.short)}</span>
           <span class="owner">${esc(e.owner)}</span>
           ${e.neighbourhood?`<span>· ${esc(e.neighbourhood)}</span>`:""}
@@ -401,9 +467,11 @@ function renderBrowse(){
   }
   const list = EVENTS.filter(matches);
   const tod = filter.timeOfDay!=="all" ? " · "+(TOD.find(t=>t[0]===filter.timeOfDay)||["",""])[1] : "";
-  document.getElementById("browseCount").textContent = filter.now
-    ? `${list.length} happening now & next · ${TODAY}`
-    : `${list.length} event${list.length!==1?"s":""}${filter.type!=="all"?" · "+TYPES[filter.type].label:""}${filter.day!=="all"?" · "+filter.day:""}${tod}`;
+  const tg  = filter.tag!=="all" ? " · "+filter.tag : "";
+  document.getElementById("browseCount").textContent =
+    filter.q  ? `${list.length} result${list.length!==1?"s":""} for “${filter.q}”${filter.type!=="all"?" · "+TYPES[filter.type].label:""}${tg}`
+    : filter.now ? `${list.length} happening now & next · ${TODAY}`
+    : `${list.length} event${list.length!==1?"s":""}${filter.type!=="all"?" · "+TYPES[filter.type].label:""}${filter.day!=="all"?" · "+filter.day:""}${tod}${tg}`;
   if(!list.length){ el.innerHTML = `<div class="empty"><div class="big">${filter.now?"🌙":"🔍"}</div><h3>${filter.now?"Nothing left today":"No matches"}</h3><p>${filter.now?"Looks like you've reached the end of today's schedule.":"Try a different filter or search."}</p></div>`; return; }
   let html="";
   for(const g of groupByDay(list)){
@@ -415,13 +483,9 @@ function renderBrowse(){
 
 function overlaps(a,b){
   if(a.day!==b.day) return false;
-  const as=toMin(a.startTime), bs=toMin(b.startTime);
-  let ae=toMin(a.endTime), be=toMin(b.endTime);
-  if(as==null||bs==null) return false;
-  if(ae==null) ae=as+60; if(be==null) be=bs+60;
-  if(a.crossesMidnight && ae<=as) ae+=1440;
-  if(b.crossesMidnight && be<=bs) be+=1440;
-  return as<be && bs<ae;
+  const A=timeInfo(a), B=timeInfo(b);
+  if(A.s==null||B.s==null) return false;
+  return A.s<B.endAbs && B.s<A.endAbs;
 }
 
 function renderMine(){
@@ -460,7 +524,51 @@ function emptyData(){
     <p>After that it works completely offline.</p></div>`;
 }
 
-function renderAll(){ renderBrowse(); renderMine(); refreshCounts(); }
+function renderAll(){ renderTagOptions(); renderBrowse(); renderCamps(); renderMine(); refreshCounts(); }
+
+/* ---------- camps directory ---------- */
+function renderCamps(){
+  const el=document.getElementById("campList"); if(!el) return;
+  if(!ENTRIES.length){ el.innerHTML = emptyData(); document.getElementById("campCount").textContent=""; return; }
+  const q=campFilter.q;
+  const list=ENTRIES.filter(en=>{
+    if(campFilter.type!=="all" && en.type!==campFilter.type) return false;
+    if(q && !(en.name+" "+en.neighbourhood).toLowerCase().includes(q)) return false;
+    return true;
+  });
+  document.getElementById("campCount").textContent =
+    `${list.length} ${campFilter.type!=="all"?(TYPES[campFilter.type].label.toLowerCase()):"camps, stages, art & vehicles"}`;
+  if(!list.length){ el.innerHTML=`<div class="empty"><div class="big">🔍</div><h3>No matches</h3><p>Try a different filter or search.</p></div>`; return; }
+  el.innerHTML = list.map(en=>{
+    const t=TYPES[en.type]||{short:en.type,icon:"•",color:"#888"};
+    const n=en.events.length;
+    return `<div class="camp" data-i="${en._i}" style="--type-c:${t.color}">
+      <div class="camp-head">
+        <span class="camp-ic">${t.icon}</span>
+        <div class="camp-main">
+          <div class="camp-name">${esc(en.name)}</div>
+          <div class="camp-sub">
+            <span class="tp" style="--type-c:${t.color};--type-bg:${t.color}22">${t.icon} ${esc(t.short)}</span>
+            ${en.neighbourhood?`<span>· ${esc(en.neighbourhood)}</span>`:""}
+            ${en.claimed?`<span class="verified">✓ Verified</span>`:""}
+          </div>
+        </div>
+        <span class="camp-cnt">${n} event${n!==1?"s":""}</span>
+        <span class="camp-chev">▶</span>
+      </div>
+      <div class="camp-events"></div>
+    </div>`;
+  }).join("");
+}
+
+function renderTagOptions(){
+  const sel=document.getElementById("tagSel"); if(!sel) return;
+  const counts={}; EVENTS.forEach(e=>e.tags.forEach(t=>counts[t]=(counts[t]||0)+1));
+  const tags=Object.keys(counts).sort((a,b)=>counts[b]-counts[a] || a.localeCompare(b));
+  sel.innerHTML = `<option value="all">All categories</option>` +
+    tags.map(t=>`<option value="${esc(t)}">${esc(t)} (${counts[t]})</option>`).join("");
+  sel.value = filter.tag;
+}
 
 /* ---------- chips ---------- */
 const TOD = [["morning","🌅 Morning"],["afternoon","☀️ Afternoon"],["evening","🌆 Evening"],["late","🌙 Late night"]];
@@ -473,6 +581,9 @@ function buildChips(){
     + DAY_ORDER.map(d=>chip("day",d,DAY_SHORT[d],"",false)).join("");
   const od=document.getElementById("todChips");
   od.innerHTML = chip("tod","all","Any time","",true) + TOD.map(([k,l])=>chip("tod",k,l,"",false)).join("");
+  const cc=document.getElementById("campTypeChips");
+  cc.innerHTML = chip("ctype","all","All","",true) + Object.entries(TYPES)
+    .map(([k,v])=>chip("ctype",k,v.short,v.color,false)).join("");
 }
 function chip(kind,val,label,color,active){
   const sw = color?`<span class="swatch" style="background:${color}"></span>`:"";
@@ -500,8 +611,9 @@ function renderSettingsStats(){
 /* ---------- tabs ---------- */
 function showTab(name){
   document.querySelectorAll("nav.tabs button").forEach(b=>b.classList.toggle("active", b.dataset.tab===name));
-  for(const s of ["browse","mine","settings"]) document.getElementById(s).classList.toggle("hide", s!==name);
+  for(const s of ["browse","camps","mine","settings"]) document.getElementById(s).classList.toggle("hide", s!==name);
   if(name==="settings") renderSettingsStats();
+  if(name==="camps") renderCamps();
   if(name==="mine") renderMine();
   window.scrollTo(0,0);
 }
@@ -515,16 +627,31 @@ function wire(){
 
   const s=document.getElementById("search"); let st;
   s.oninput=()=>{ clearTimeout(st); st=setTimeout(()=>{ filter.q=s.value.trim().toLowerCase(); renderBrowse(); },150); };
+  document.getElementById("tagSel").onchange=ev=>{ filter.tag=ev.target.value; renderBrowse(); };
+  const cs=document.getElementById("campSearch"); let ct;
+  cs.oninput=()=>{ clearTimeout(ct); ct=setTimeout(()=>{ campFilter.q=cs.value.trim().toLowerCase(); renderCamps(); },150); };
 
   document.addEventListener("click",e=>{
     const chip=e.target.closest(".chip");
     if(chip){ const k=chip.dataset.kind, v=chip.dataset.val;
+      chip.parentElement.querySelectorAll(".chip").forEach(c=>c.classList.toggle("active", c===chip));
+      if(k==="ctype"){ campFilter.type=v; renderCamps(); return; }
       if(k==="now"){ filter.now=true; filter.day="all"; }
       else if(k==="day"){ filter.now=false; filter.day=v; }
       else if(k==="type"){ filter.type=v; }
       else if(k==="tod"){ filter.timeOfDay=v; }
-      chip.parentElement.querySelectorAll(".chip").forEach(c=>c.classList.toggle("active", c===chip));
       renderBrowse(); return; }
+
+    const ch=e.target.closest(".camp-head");
+    if(ch){ const camp=ch.parentElement, body=camp.querySelector(".camp-events");
+      const open=camp.classList.toggle("open");
+      if(open && !body.dataset.filled){
+        const en=ENTRIES[+camp.dataset.i];
+        body.innerHTML = (en && en.events.length) ? en.events.map(ev=>eventCard(ev)).join("")
+          : `<div class="muted-note">No scheduled events listed for this one.</div>`;
+        body.dataset.filled="1";
+      }
+      return; }
 
     const star=e.target.closest("[data-star]");
     if(star){ const id=star.dataset.star;
@@ -595,8 +722,7 @@ function exportICS(){
   const stamp=`${now.getUTCFullYear()}${pad(now.getUTCMonth()+1)}${pad(now.getUTCDate())}T${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}Z`;
   const L=["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Otherworld Planner//EN","CALSCALE:GREGORIAN","METHOD:PUBLISH","X-WR-CALNAME:Otherworld 2026"];
   for(const e of dated){
-    const date=FESTIVAL_DATES[e.day], s=toMin(e.startTime);
-    let en=toMin(e.endTime); if(en==null) en=s+60; if(e.crossesMidnight && en<=s) en+=1440; if(en<=s) en=s+60;
+    const date=FESTIVAL_DATES[e.day], ti=timeInfo(e), s=ti.s, en=ti.endAbs;
     const t=TYPES[e.ownerType]||{label:e.ownerType};
     const loc=[e.owner,e.neighbourhood].filter(Boolean).join(" · ");
     const desc=[`${t.label||t.short||""} — ${e.owner}`, e.description].filter(Boolean).join("\n\n");
