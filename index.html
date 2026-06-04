@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Otherworld 2026 — My Planner</title>
+<meta name="description" content="Personal, offline schedule planner for Otherworld 2026. Browse events, star your favourites, build your weekend." />
+<!-- Add-to-Home-Screen / PWA hints -->
+<meta name="theme-color" content="#0c0a1a" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Otherworld" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9C%A8%3C/text%3E%3C/svg%3E" />
+<style>
+  :root{
+    --bg:#0c0a1a; --bg2:#13102a; --card:#1a1636; --card2:#221c44;
+    --line:#2c2552; --text:#ece9ff; --muted:#9a93c7; --faint:#6f679e;
+    --accent:#a855f7; --accent2:#ec4899; --star:#fbbf24;
+    --camp:#f59e0b; --sound_stage:#a855f7; --art_installation:#ec4899; --mutant_vehicle:#22d3ee;
+    --ok:#34d399; --warn:#fb7185;
+    --safe-top:env(safe-area-inset-top,0px); --safe-bot:env(safe-area-inset-bottom,0px);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{
+    background:radial-gradient(1200px 600px at 50% -10%,#241a4d 0%,var(--bg) 55%) fixed;
+    color:var(--text);
+    font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    min-height:100vh;-webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent2)}
+  button{font-family:inherit;cursor:pointer}
+
+  /* ---- App bar ---- */
+  header{
+    position:sticky;top:0;z-index:40;
+    padding:calc(var(--safe-top) + 12px) 16px 10px;
+    background:linear-gradient(#0c0a1aee,#0c0a1ac0);backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line);
+  }
+  .brand{display:flex;align-items:center;gap:10px}
+  .brand h1{font-size:18px;margin:0;letter-spacing:.2px}
+  .brand .spark{font-size:20px;filter:drop-shadow(0 0 6px #a855f7aa)}
+  .brand .sub{font-size:11px;color:var(--muted);margin-top:1px}
+  .status{margin-left:auto;display:flex;align-items:center;gap:8px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--faint);box-shadow:0 0 0 0 transparent}
+  .dot.on{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .dot.off{background:var(--warn)}
+  .iconbtn{background:var(--card);border:1px solid var(--line);color:var(--text);
+    width:36px;height:36px;border-radius:10px;font-size:16px;display:grid;place-items:center}
+  .iconbtn:active{transform:scale(.93)}
+  .iconbtn.spin{animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* ---- Tabs ---- */
+  nav.tabs{position:sticky;top:0;z-index:30;display:flex;gap:6px;padding:10px 12px;
+    background:#0c0a1aee;backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  nav.tabs button{flex:1;background:transparent;border:1px solid transparent;color:var(--muted);
+    padding:9px 6px;border-radius:12px;font-size:13px;font-weight:600;display:flex;
+    align-items:center;justify-content:center;gap:6px}
+  nav.tabs button.active{background:var(--card2);color:var(--text);border-color:var(--line)}
+  .badge{background:var(--accent);color:#fff;border-radius:999px;font-size:11px;
+    min-width:18px;height:18px;padding:0 5px;display:inline-grid;place-items:center;font-weight:700}
+
+  main{padding:12px 12px calc(40px + var(--safe-bot))}
+
+  /* ---- Filters ---- */
+  .search{width:100%;background:var(--card);border:1px solid var(--line);color:var(--text);
+    border-radius:12px;padding:11px 12px;font-size:15px;outline:none}
+  .search:focus{border-color:var(--accent)}
+  .chips{display:flex;gap:8px;overflow-x:auto;padding:10px 2px 4px;scrollbar-width:none}
+  .chips::-webkit-scrollbar{display:none}
+  .chip{white-space:nowrap;background:var(--card);border:1px solid var(--line);color:var(--muted);
+    padding:7px 12px;border-radius:999px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px}
+  .chip.active{color:#fff;border-color:transparent;background:linear-gradient(135deg,var(--accent),var(--accent2))}
+  .chip .swatch{width:9px;height:9px;border-radius:50%}
+
+  /* ---- Day section ---- */
+  .day-h{position:sticky;top:0;z-index:10;margin:18px 0 8px;padding:6px 2px;
+    font-size:13px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);
+    background:linear-gradient(#0c0a1a,#0c0a1acc);backdrop-filter:blur(4px)}
+  .day-h .n{color:var(--muted);font-weight:600;letter-spacing:0;text-transform:none;margin-left:6px}
+
+  /* ---- Event card ---- */
+  .ev{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:12px 12px 12px 14px;margin-bottom:10px;position:relative;overflow:hidden}
+  .ev::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--type-c,#666)}
+  .ev .row{display:flex;gap:10px;align-items:flex-start}
+  .ev .time{font-variant-numeric:tabular-nums;font-weight:700;font-size:13px;color:var(--text);
+    min-width:46px;padding-top:1px}
+  .ev .time .plus{color:var(--faint);font-size:10px;font-weight:600}
+  .ev .body{flex:1;min-width:0}
+  .ev .title{font-weight:650;font-size:15px;line-height:1.25}
+  .ev .meta{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:var(--muted)}
+  .ev .owner{color:var(--text);font-weight:600}
+  .tp{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;
+    padding:2px 7px;border-radius:999px;background:var(--type-bg,#2226);color:var(--type-c,#aaa)}
+  .verified{color:var(--ok);font-weight:700;font-size:11px;display:inline-flex;gap:3px;align-items:center}
+  .tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+  .tag{font-size:10.5px;color:var(--muted);background:#ffffff0c;border:1px solid var(--line);
+    padding:1px 7px;border-radius:999px}
+  .desc{font-size:13px;color:var(--muted);margin-top:8px;display:none;white-space:pre-wrap}
+  .ev.open .desc{display:block}
+  .ev .more{font-size:12px;color:var(--accent2);margin-top:6px;display:inline-block}
+  .star{background:transparent;border:0;font-size:22px;line-height:1;color:var(--faint);
+    padding:2px 0 2px 8px;align-self:flex-start}
+  .star.on{color:var(--star);filter:drop-shadow(0 0 6px #fbbf2466)}
+  .star:active{transform:scale(1.25)}
+
+  .conflict{margin-top:8px;font-size:11.5px;color:var(--warn);display:flex;align-items:center;gap:5px}
+
+  /* ---- Empty / states ---- */
+  .empty{text-align:center;color:var(--muted);padding:48px 24px}
+  .empty .big{font-size:40px;margin-bottom:10px}
+  .empty h3{color:var(--text);margin:0 0 6px;font-size:17px}
+  .empty p{margin:4px 0;font-size:14px}
+  .countline{font-size:12px;color:var(--faint);margin:2px 2px 10px}
+
+  /* ---- Settings ---- */
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+  .card h3{margin:0 0 4px;font-size:14px}
+  .card p{margin:0 0 10px;font-size:12.5px;color:var(--muted)}
+  .card label{font-size:12px;color:var(--faint);display:block;margin-bottom:5px;font-weight:600}
+  .card input[type=url],.card textarea{width:100%;background:var(--bg2);border:1px solid var(--line);
+    color:var(--text);border-radius:10px;padding:10px;font-size:13px;font-family:ui-monospace,monospace}
+  .card textarea{min-height:90px;resize:vertical}
+  .btn{background:linear-gradient(135deg,var(--accent),var(--accent2));border:0;color:#fff;
+    font-weight:700;font-size:14px;padding:11px 14px;border-radius:11px;width:100%;margin-top:10px}
+  .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--text)}
+  .btn.danger{background:transparent;border:1px solid #5a2740;color:var(--warn)}
+  .btn:active{transform:scale(.98)}
+  .kv{display:flex;justify-content:space-between;font-size:12.5px;padding:5px 0;border-top:1px solid var(--line)}
+  .kv:first-of-type{border-top:0}
+  .kv span:last-child{color:var(--muted);text-align:right}
+
+  /* ---- Toast ---- */
+  #toast{position:fixed;left:50%;bottom:calc(24px + var(--safe-bot));transform:translateX(-50%) translateY(20px);
+    background:#000d;border:1px solid var(--line);color:#fff;padding:10px 16px;border-radius:12px;
+    font-size:13px;opacity:0;pointer-events:none;transition:.25s;z-index:60;max-width:90vw;text-align:center}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .hide{display:none!important}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <span class="spark">✨</span>
+    <div>
+      <h1>Otherworld 2026</h1>
+      <div class="sub">My weekend planner</div>
+    </div>
+    <div class="status">
+      <span class="dot" id="netdot" title="connection"></span>
+      <button class="iconbtn" id="refreshBtn" title="Refresh schedule">⟳</button>
+    </div>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button data-tab="browse" class="active">🔭 Browse</button>
+  <button data-tab="mine">⭐ My Schedule <span class="badge hide" id="mineCount">0</span></button>
+  <button data-tab="settings">⚙︎ Settings</button>
+</nav>
+
+<main>
+  <!-- BROWSE -->
+  <section id="browse">
+    <input class="search" id="search" type="search" placeholder="Search events, camps, descriptions…" autocomplete="off" />
+    <div class="chips" id="typeChips"></div>
+    <div class="chips" id="dayChips"></div>
+    <div class="countline" id="browseCount"></div>
+    <div id="browseList"></div>
+  </section>
+
+  <!-- MY SCHEDULE -->
+  <section id="mine" class="hide">
+    <div class="countline" id="mineSummary"></div>
+    <div id="mineList"></div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section id="settings" class="hide">
+    <div class="card">
+      <h3>Schedule data</h3>
+      <p>The planner pulls the live community schedule once while you have signal, then works fully offline from a local copy on this device.</p>
+      <div class="kv"><span>Events loaded</span><span id="stEvents">—</span></div>
+      <div class="kv"><span>Last updated</span><span id="stUpdated">—</span></div>
+      <div class="kv"><span>Source updated</span><span id="stSource">—</span></div>
+      <button class="btn" id="stRefresh">⟳ Refresh now</button>
+    </div>
+
+    <div class="card">
+      <h3>Data source URL</h3>
+      <p>Defaults to the canonical community feed. Change only if you know what you're doing.</p>
+      <label>events.json URL</label>
+      <input type="url" id="stUrl" spellcheck="false" />
+      <button class="btn ghost" id="stSaveUrl">Save URL</button>
+    </div>
+
+    <div class="card">
+      <h3>Paste data (offline fallback)</h3>
+      <p>No signal? Paste the raw <code>events.json</code> contents here to load the schedule manually.</p>
+      <textarea id="stPaste" placeholder='{ "metadata": {...}, "entries": [...] }' spellcheck="false"></textarea>
+      <button class="btn ghost" id="stImport">Import pasted data</button>
+    </div>
+
+    <div class="card">
+      <h3>Your favourites</h3>
+      <p>Stored privately on this device. Back them up or move them to another phone.</p>
+      <div class="kv"><span>Starred events</span><span id="stFavCount">0</span></div>
+      <button class="btn ghost" id="stExport">⬇︎ Export favourites</button>
+      <button class="btn ghost" id="stImportFav">⬆︎ Import favourites</button>
+      <button class="btn danger" id="stClearFav">Clear all favourites</button>
+    </div>
+
+    <div class="card">
+      <p style="margin:0">Unofficial &amp; community-made. Not affiliated with Kindle Arts Society or Otherworld. Add to Home Screen to use it like an app.</p>
+    </div>
+  </section>
+</main>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+const DEFAULT_URL = "https://raw.githubusercontent.com/Isaiiaas/OtherworldWWW/master/events.json";
+const LS = { data:"ow:data", meta:"ow:meta", favs:"ow:favs", settings:"ow:settings" };
+const DAY_ORDER = ["Thursday","Friday","Saturday","Sunday","Monday"];
+const DAY_SHORT = { Thursday:"Thu", Friday:"Fri", Saturday:"Sat", Sunday:"Sun", Monday:"Mon" };
+const TYPES = {
+  camp:            { label:"Camps",          short:"Camp",     icon:"🏕️", color:"#f59e0b" },
+  sound_stage:     { label:"Sound Stages",    short:"Stage",    icon:"🔊", color:"#a855f7" },
+  art_installation:{ label:"Art",             short:"Art",      icon:"🎨", color:"#ec4899" },
+  mutant_vehicle:  { label:"Mutant Vehicles", short:"Vehicle",  icon:"🚐", color:"#22d3ee" },
+};
+
+/* ---------- state ---------- */
+let EVENTS = [];                 // flattened
+let FAVS = new Set(load(LS.favs, []));
+let SETTINGS = load(LS.settings, { url: DEFAULT_URL });
+let filter = { type:"all", day:"all", q:"" };
+
+/* ---------- storage helpers ---------- */
+function load(k, fb){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):fb; }catch(e){ return fb; } }
+function save(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){ toast("Storage full — couldn't save"); } }
+function saveFavs(){ save(LS.favs, [...FAVS]); refreshCounts(); }
+
+/* ---------- utilities ---------- */
+const esc = s => (s==null?"":String(s)).replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+function toMin(t){ if(!t||!/^\d{1,2}:\d{2}$/.test(t)) return null; const [h,m]=t.split(":").map(Number); return h*60+m; }
+function idOf(e){ return `${e.ownerType}|${e.owner}|${e.day}|${e.startTime}|${e.title}`; }
+function dayIdx(d){ const i=DAY_ORDER.indexOf(d); return i<0?99:i; }
+let toastT;
+function toast(msg){ const el=document.getElementById("toast"); el.textContent=msg; el.classList.add("show");
+  clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove("show"),2200); }
+
+/* ---------- data ingest ---------- */
+function ingest(json){
+  const entries = (json && json.entries) || [];
+  const flat = [];
+  for(const en of entries){
+    const claimed = !!en.claimed;
+    for(const e of (en.events||[])){
+      if(!e || !e.title) continue;
+      flat.push({
+        owner: e.owner || en.name,
+        ownerType: e.ownerType || en.type || "camp",
+        title: e.title,
+        description: e.description || "",
+        day: e.day || "",
+        startTime: e.startTime || "",
+        endTime: e.endTime || "",
+        crossesMidnight: !!e.crossesMidnight,
+        tags: Array.isArray(e.tags)?e.tags:[],
+        claimed,
+        neighbourhood: en.neighbourhood || "",
+      });
+    }
+  }
+  flat.sort((a,b)=> dayIdx(a.day)-dayIdx(b.day) || (toMin(a.startTime)??1e9)-(toMin(b.startTime)??1e9) || a.title.localeCompare(b.title));
+  EVENTS = flat;
+  return { count: flat.length, sourceUpdated: json && json.metadata && (json.metadata.lastReconciledAt || json.metadata.extractedAt) };
+}
+
+async function fetchData(manual){
+  const url = (SETTINGS.url||DEFAULT_URL).trim();
+  const btn = document.getElementById("refreshBtn"); btn.classList.add("spin");
+  try{
+    const res = await fetch(url, { cache:"no-store" });
+    if(!res.ok) throw new Error("HTTP "+res.status);
+    const json = await res.json();
+    if(!json || !Array.isArray(json.entries)) throw new Error("Unexpected data shape");
+    applyData(json, "live");
+    if(manual) toast("Schedule updated ✓");
+  }catch(err){
+    if(manual) toast("Couldn't refresh: "+err.message);
+    if(!EVENTS.length) renderAll();   // show empty-state guidance
+  }finally{ btn.classList.remove("spin"); }
+}
+
+function applyData(json, origin){
+  const info = ingest(json);
+  save(LS.data, json);
+  save(LS.meta, { fetchedAt: Date.now(), sourceUpdated: info.sourceUpdated||null, origin });
+  renderAll();
+  renderSettingsStats();
+}
+
+/* ---------- rendering ---------- */
+function matches(e){
+  if(filter.type!=="all" && e.ownerType!==filter.type) return false;
+  if(filter.day!=="all" && e.day!==filter.day) return false;
+  if(filter.q){
+    const q=filter.q;
+    const hay=(e.title+" "+e.owner+" "+e.description+" "+e.tags.join(" ")+" "+e.neighbourhood).toLowerCase();
+    if(!hay.includes(q)) return false;
+  }
+  return true;
+}
+
+function eventCard(e, extra){
+  const t = TYPES[e.ownerType] || { short:e.ownerType, icon:"•", color:"#888" };
+  const id = idOf(e);
+  const on = FAVS.has(id);
+  const plus = e.crossesMidnight ? '<span class="plus">+1</span>' : '';
+  const time = e.startTime ? `${esc(e.startTime)}${e.endTime?`<br><span style="color:var(--faint);font-weight:600">${esc(e.endTime)}${plus}</span>`:''}` : "—";
+  const tags = e.tags.slice(0,6).map(t=>`<span class="tag">${esc(t)}</span>`).join("");
+  const verified = e.claimed ? `<span class="verified">✓ Verified</span>` : "";
+  const hasDesc = e.description && e.description.length>0;
+  return `<div class="ev" data-id="${esc(id)}" style="--type-c:${t.color};--type-bg:${t.color}22">
+    <div class="row">
+      <div class="time">${time}</div>
+      <div class="body">
+        <div class="title">${esc(e.title)}</div>
+        <div class="meta">
+          <span class="tp" style="--type-c:${t.color};--type-bg:${t.color}22">${t.icon} ${esc(t.short)}</span>
+          <span class="owner">${esc(e.owner)}</span>
+          ${e.neighbourhood?`<span>· ${esc(e.neighbourhood)}</span>`:""}
+          ${verified}
+        </div>
+        ${tags?`<div class="tags">${tags}</div>`:""}
+        ${hasDesc?`<span class="more">＋ details</span><div class="desc">${esc(e.description)}</div>`:""}
+      </div>
+      <button class="star ${on?"on":""}" data-star="${esc(id)}" aria-label="favourite">${on?"★":"☆"}</button>
+    </div>
+    ${extra||""}
+  </div>`;
+}
+
+function groupByDay(list){
+  const groups = {};
+  for(const e of list){ (groups[e.day]||(groups[e.day]=[])).push(e); }
+  return Object.keys(groups).sort((a,b)=>dayIdx(a)-dayIdx(b)).map(day=>({day, items:groups[day]}));
+}
+
+function renderBrowse(){
+  const el = document.getElementById("browseList");
+  if(!EVENTS.length){
+    el.innerHTML = emptyData();
+    document.getElementById("browseCount").textContent = "";
+    return;
+  }
+  const list = EVENTS.filter(matches);
+  document.getElementById("browseCount").textContent =
+    `${list.length} event${list.length!==1?"s":""}${filter.type!=="all"?" · "+TYPES[filter.type].label:""}${filter.day!=="all"?" · "+filter.day:""}`;
+  if(!list.length){ el.innerHTML = `<div class="empty"><div class="big">🔍</div><h3>No matches</h3><p>Try a different filter or search.</p></div>`; return; }
+  let html="";
+  for(const g of groupByDay(list)){
+    html += `<div class="day-h">${esc(g.day)}<span class="n">${g.items.length}</span></div>`;
+    html += g.items.map(eventCard).join("");
+  }
+  el.innerHTML = html;
+}
+
+function overlaps(a,b){
+  if(a.day!==b.day) return false;
+  const as=toMin(a.startTime), bs=toMin(b.startTime);
+  let ae=toMin(a.endTime), be=toMin(b.endTime);
+  if(as==null||bs==null) return false;
+  if(ae==null) ae=as+60; if(be==null) be=bs+60;
+  if(a.crossesMidnight && ae<=as) ae+=1440;
+  if(b.crossesMidnight && be<=bs) be+=1440;
+  return as<be && bs<ae;
+}
+
+function renderMine(){
+  const el = document.getElementById("mineList");
+  const list = EVENTS.filter(e=>FAVS.has(idOf(e)));
+  // fall back to stored favs that aren't in current data (still show them minimally)
+  document.getElementById("mineSummary").textContent =
+    list.length ? `${list.length} starred event${list.length!==1?"s":""} across your weekend` : "";
+  if(!FAVS.size){
+    el.innerHTML = `<div class="empty"><div class="big">⭐</div><h3>No favourites yet</h3>
+      <p>Tap the ☆ on any event in <b>Browse</b> to build your personal schedule here.</p></div>`;
+    return;
+  }
+  if(!list.length){
+    el.innerHTML = `<div class="empty"><div class="big">⭐</div><h3>${FAVS.size} saved</h3>
+      <p>Your favourites are stored, but the schedule isn't loaded yet. Connect once and hit refresh.</p></div>`;
+    return;
+  }
+  let html="";
+  for(const g of groupByDay(list)){
+    html += `<div class="day-h">${esc(g.day)}<span class="n">${g.items.length}</span></div>`;
+    html += g.items.map(e=>{
+      // flag time clashes within the same day
+      const clash = g.items.some(o=>o!==e && overlaps(e,o));
+      return eventCard(e, clash ? '<div class="conflict">⚠︎ overlaps another favourite</div>' : "");
+    }).join("");
+  }
+  el.innerHTML = html;
+}
+
+function emptyData(){
+  return `<div class="empty"><div class="big">📡</div><h3>Schedule not loaded</h3>
+    <p>Connect to the internet once and tap <b>⟳ Refresh</b> to download the full Otherworld schedule.</p>
+    <p>After that it works completely offline.</p></div>`;
+}
+
+function renderAll(){ renderBrowse(); renderMine(); refreshCounts(); }
+
+/* ---------- chips ---------- */
+function buildChips(){
+  const tc=document.getElementById("typeChips");
+  tc.innerHTML = chip("type","all","All","",true) + Object.entries(TYPES)
+    .map(([k,v])=>chip("type",k,v.short,v.color,false)).join("");
+  const dc=document.getElementById("dayChips");
+  dc.innerHTML = chip("day","all","All days","",true) + DAY_ORDER
+    .map(d=>chip("day",d,DAY_SHORT[d],"",false)).join("");
+}
+function chip(kind,val,label,color,active){
+  const sw = color?`<span class="swatch" style="background:${color}"></span>`:"";
+  return `<button class="chip ${active?"active":""}" data-kind="${kind}" data-val="${esc(val)}">${sw}${esc(label)}</button>`;
+}
+
+/* ---------- counts / settings ---------- */
+function refreshCounts(){
+  const b=document.getElementById("mineCount");
+  b.textContent=FAVS.size; b.classList.toggle("hide", FAVS.size===0);
+  const fc=document.getElementById("stFavCount"); if(fc) fc.textContent=FAVS.size;
+}
+function fmtWhen(ts){ if(!ts) return "—"; const d=new Date(ts); const diff=(Date.now()-ts)/1000;
+  if(diff<60) return "just now"; if(diff<3600) return Math.floor(diff/60)+" min ago";
+  if(diff<86400) return Math.floor(diff/3600)+" h ago"; return d.toLocaleString([], {month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}); }
+function renderSettingsStats(){
+  const meta=load(LS.meta,{});
+  document.getElementById("stEvents").textContent = EVENTS.length || "—";
+  document.getElementById("stUpdated").textContent = fmtWhen(meta.fetchedAt);
+  document.getElementById("stSource").textContent = meta.sourceUpdated ? new Date(meta.sourceUpdated).toLocaleString([], {month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}) : "—";
+  document.getElementById("stUrl").value = SETTINGS.url||DEFAULT_URL;
+  refreshCounts();
+}
+
+/* ---------- tabs ---------- */
+function showTab(name){
+  document.querySelectorAll("nav.tabs button").forEach(b=>b.classList.toggle("active", b.dataset.tab===name));
+  for(const s of ["browse","mine","settings"]) document.getElementById(s).classList.toggle("hide", s!==name);
+  if(name==="settings") renderSettingsStats();
+  if(name==="mine") renderMine();
+  window.scrollTo(0,0);
+}
+
+/* ---------- events / wiring ---------- */
+function wire(){
+  document.querySelectorAll("nav.tabs button").forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
+
+  document.getElementById("refreshBtn").onclick=()=>fetchData(true);
+  document.getElementById("stRefresh").onclick=()=>fetchData(true);
+
+  const s=document.getElementById("search"); let st;
+  s.oninput=()=>{ clearTimeout(st); st=setTimeout(()=>{ filter.q=s.value.trim().toLowerCase(); renderBrowse(); },150); };
+
+  document.addEventListener("click",e=>{
+    const chip=e.target.closest(".chip");
+    if(chip){ const k=chip.dataset.kind, v=chip.dataset.val; filter[k]=v;
+      chip.parentElement.querySelectorAll(".chip").forEach(c=>c.classList.toggle("active", c===chip));
+      renderBrowse(); return; }
+
+    const star=e.target.closest("[data-star]");
+    if(star){ const id=star.dataset.star;
+      if(FAVS.has(id)){ FAVS.delete(id); } else { FAVS.add(id); }
+      saveFavs();
+      // update this star + mirror across both lists
+      document.querySelectorAll(`[data-star="${cssEsc(id)}"]`).forEach(b=>{
+        const on=FAVS.has(id); b.classList.toggle("on",on); b.textContent=on?"★":"☆";
+      });
+      if(!document.getElementById("mine").classList.contains("hide")) renderMine();
+      return; }
+
+    const ev=e.target.closest(".ev");
+    if(ev && !e.target.closest("button")){ ev.classList.toggle("open");
+      const m=ev.querySelector(".more"); if(m) m.textContent = ev.classList.contains("open")?"− less":"＋ details"; }
+  });
+
+  // settings actions
+  document.getElementById("stSaveUrl").onclick=()=>{ const u=document.getElementById("stUrl").value.trim();
+    SETTINGS.url=u||DEFAULT_URL; save(LS.settings,SETTINGS); toast("Saved. Refreshing…"); fetchData(true); };
+  document.getElementById("stImport").onclick=()=>{ const raw=document.getElementById("stPaste").value.trim();
+    if(!raw) return toast("Nothing pasted");
+    try{ const json=JSON.parse(raw); if(!Array.isArray(json.entries)) throw new Error("missing entries[]");
+      applyData(json,"pasted"); document.getElementById("stPaste").value=""; toast("Imported ✓"); }
+    catch(err){ toast("Invalid JSON: "+err.message); } };
+  document.getElementById("stExport").onclick=exportFavs;
+  document.getElementById("stImportFav").onclick=importFavs;
+  document.getElementById("stClearFav").onclick=()=>{ if(confirm("Remove all "+FAVS.size+" favourites?")){ FAVS.clear(); saveFavs(); renderAll(); toast("Cleared"); } };
+
+  window.addEventListener("online", setNet); window.addEventListener("offline", setNet); setNet();
+}
+function cssEsc(s){ return (window.CSS&&CSS.escape)?CSS.escape(s):s.replace(/["\\]/g,"\\$&"); }
+function setNet(){ const d=document.getElementById("netdot"); const on=navigator.onLine;
+  d.classList.toggle("on",on); d.classList.toggle("off",!on); d.title=on?"online":"offline"; }
+
+function exportFavs(){
+  const blob=new Blob([JSON.stringify({ app:"otherworld-planner", favs:[...FAVS] },null,2)],{type:"application/json"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+  a.download="otherworld-favourites.json"; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  toast("Exported "+FAVS.size+" favourites");
+}
+function importFavs(){
+  const inp=document.createElement("input"); inp.type="file"; inp.accept="application/json,.json";
+  inp.onchange=()=>{ const f=inp.files[0]; if(!f) return; const r=new FileReader();
+    r.onload=()=>{ try{ const j=JSON.parse(r.result); const arr=Array.isArray(j)?j:j.favs;
+      if(!Array.isArray(arr)) throw new Error("no favs array"); arr.forEach(x=>FAVS.add(x));
+      saveFavs(); renderAll(); toast("Merged "+arr.length+" favourites"); }
+      catch(err){ toast("Bad file: "+err.message); } };
+    r.readAsText(f); };
+  inp.click();
+}
+
+/* ---------- boot ---------- */
+function boot(){
+  buildChips(); wire();
+  const cached = load(LS.data, null);
+  if(cached && Array.isArray(cached.entries)){ ingest(cached); }
+  renderAll(); renderSettingsStats();
+  // refresh in background if online
+  if(navigator.onLine) fetchData(false);
+  else if(!EVENTS.length) toast("Offline — connect once to load the schedule");
+}
+boot();
+</script>
+</body>
+</html>
