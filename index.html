@@ -171,6 +171,33 @@
   .camp.open .camp-events{display:block}
   .camp-events .ev{background:var(--card2)}
   .muted-note{color:var(--faint);font-size:13px;padding:6px 4px 12px}
+
+  /* ---- up-next strip ---- */
+  .upnext{margin:0 12px 0;padding:11px 13px;border-radius:14px;
+    background:linear-gradient(135deg,#2a1c4d,#1c1640);border:1px solid #3a2f6b;position:relative}
+  .upnext .uphead{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--accent2)}
+  .upnext .upitem{display:flex;align-items:baseline;gap:8px;margin-top:6px}
+  .upnext .uptime{font-variant-numeric:tabular-nums;font-weight:700;font-size:13px;color:#fff;white-space:nowrap}
+  .upnext .uptitle{font-size:14px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .upnext .upin{font-size:12px;color:var(--accent2);font-weight:700;white-space:nowrap;margin-left:auto}
+  .upnext .uplive{color:#fff;background:linear-gradient(135deg,#ef4444,#f97316);border-radius:999px;
+    font-size:10px;font-weight:800;padding:1px 7px;margin-left:auto;white-space:nowrap}
+  .upnext .upmuted{font-size:12.5px;color:var(--muted);margin-top:4px}
+
+  /* ---- map ---- */
+  .mapwrap{margin-top:10px;border:1px solid var(--line);border-radius:14px;overflow:auto;
+    background:#0a0818;max-height:74vh;-webkit-overflow-scrolling:touch;touch-action:pan-x pan-y pinch-zoom}
+  .mapstage{position:relative;display:inline-block;min-width:100%;line-height:0}
+  #mapImg{display:block;width:100%;height:auto;user-select:none;-webkit-user-drag:none}
+  .mappins{position:absolute;inset:0}
+  .pin{position:absolute;width:13px;height:13px;border-radius:50%;border:2px solid #fff;
+    transform:translate(-50%,-50%);box-shadow:0 0 0 1px #0008,0 1px 3px #000a;cursor:pointer;transition:.12s}
+  .pin.fav{box-shadow:0 0 0 2px var(--star),0 0 8px var(--star)}
+  .pin.sel{width:20px;height:20px;z-index:5;box-shadow:0 0 0 3px #fff,0 0 12px #fff}
+  .mapinfo{margin-top:10px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px}
+  .mapinfo .mi-name{font-weight:700;font-size:16px}
+  .mapinfo .mi-sub{font-size:12.5px;color:var(--muted);margin:4px 0 10px;display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+  .maphint{font-size:12px;color:var(--faint);margin-top:8px;text-align:center}
 </style>
 </head>
 <body>
@@ -191,11 +218,13 @@
 <nav class="tabs">
   <button data-tab="browse" class="active">🔭 Browse</button>
   <button data-tab="camps">🏕️ Camps</button>
+  <button data-tab="map">🗺️ Map</button>
   <button data-tab="mine">⭐ Mine <span class="badge hide" id="mineCount">0</span></button>
   <button data-tab="settings">⚙︎</button>
 </nav>
 
 <main>
+  <div id="upnext" class="upnext hide"></div>
   <!-- BROWSE -->
   <section id="browse">
     <input class="search" id="search" type="search" placeholder="Search events, camps, descriptions…" autocomplete="off" />
@@ -213,6 +242,19 @@
     <div class="chips" id="campTypeChips"></div>
     <div class="countline" id="campCount"></div>
     <div id="campList"></div>
+  </section>
+
+  <!-- MAP -->
+  <section id="map" class="hide">
+    <div class="chips" id="mapTypeChips"></div>
+    <div id="mapInfo" class="mapinfo hide"></div>
+    <div class="mapwrap" id="mapWrap">
+      <div class="mapstage" id="mapStage">
+        <img id="mapImg" alt="Otherworld site map" />
+        <div class="mappins" id="mapPins"></div>
+      </div>
+    </div>
+    <div class="maphint" id="mapHint">Pinch to zoom · tap a pin for details</div>
   </section>
 
   <!-- MY SCHEDULE -->
@@ -268,7 +310,10 @@
 <script>
 "use strict";
 const DEFAULT_URL = "https://raw.githubusercontent.com/Isaiiaas/OtherworldWWW/master/events.json";
-const LS = { data:"ow:data", meta:"ow:meta", favs:"ow:favs", settings:"ow:settings" };
+const RAW_BASE = DEFAULT_URL.replace(/\/[^/]*$/, "");
+const MAP_PINS_URL = RAW_BASE + "/map-locations.json";
+const MAP_IMG_URL  = RAW_BASE + "/map.png";
+const LS = { data:"ow:data", meta:"ow:meta", favs:"ow:favs", settings:"ow:settings", mappins:"ow:mappins" };
 const DAY_ORDER = ["Thursday","Friday","Saturday","Sunday","Monday"];
 const DAY_SHORT = { Thursday:"Thu", Friday:"Fri", Saturday:"Sat", Sunday:"Sun", Monday:"Mon" };
 const TYPES = {
@@ -285,6 +330,11 @@ let FAVS = new Set(load(LS.favs, []));
 let SETTINGS = load(LS.settings, { url: DEFAULT_URL });
 let filter = { type:"all", day:"all", timeOfDay:"all", tag:"all", q:"", now:false };
 let campFilter = { type:"all", q:"" };
+let MAP = load(LS.mappins, null);   // {pageWidth,pageHeight,pins:[...]}
+let mapFilter = { type:"all" };
+let mapImgReady = false;
+let upTimer = null;
+const canon = s => String(s||"").toLowerCase().normalize("NFKD").replace(/[^a-z0-9]/g,"");
 
 /* ---------- storage helpers ---------- */
 function load(k, fb){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):fb; }catch(e){ return fb; } }
@@ -494,8 +544,10 @@ function renderMine(){
   // fall back to stored favs that aren't in current data (still show them minimally)
   document.getElementById("mineSummary").textContent =
     list.length ? `${list.length} starred event${list.length!==1?"s":""} across your weekend` : "";
-  document.getElementById("mineActions").innerHTML =
-    list.length ? `<button class="btn ghost" id="icsBtn">📅 Add my schedule to phone calendar (.ics)</button>` : "";
+  document.getElementById("mineActions").innerHTML = list.length
+    ? `<button class="btn ghost" id="shareBtn">📤 Share my lineup</button>
+       <button class="btn ghost" id="icsBtn">📅 Add to phone calendar (.ics)</button>`
+    : "";
   if(!FAVS.size){
     el.innerHTML = `<div class="empty"><div class="big">⭐</div><h3>No favourites yet</h3>
       <p>Tap the ☆ on any event in <b>Browse</b> to build your personal schedule here.</p></div>`;
@@ -524,7 +576,34 @@ function emptyData(){
     <p>After that it works completely offline.</p></div>`;
 }
 
-function renderAll(){ renderTagOptions(); renderBrowse(); renderCamps(); renderMine(); refreshCounts(); }
+function renderAll(){ renderTagOptions(); renderBrowse(); renderCamps(); renderMine(); renderUpNext(); refreshCounts(); }
+
+/* ---------- "up next" strip (your starred picks, on now & coming up) ---------- */
+function fmtClock(min){ min=((min%1440)+1440)%1440; return pad(Math.floor(min/60))+":"+pad(min%60); }
+function renderUpNext(){
+  const el=document.getElementById("upnext"); if(!el) return;
+  if(!TODAY || !EVENTS.length){ el.classList.add("hide"); return; }
+  const todays=EVENTS.filter(e=>FAVS.has(idOf(e)) && e.day===TODAY && timeInfo(e).s!=null)
+    .sort((a,b)=>timeInfo(a).s-timeInfo(b).s);
+  if(!todays.length){ el.classList.add("hide"); return; }
+  const n=nowMin();
+  const on=todays.filter(e=>{const ti=timeInfo(e); return ti.s<=n && n<ti.endAbs;});
+  const next=todays.find(e=>timeInfo(e).s>n);
+  let rows="";
+  for(const e of on.slice(0,2)){
+    rows+=`<div class="upitem"><span class="uptime">${esc(e.startTime)}</span><span class="uptitle">${esc(e.title)}</span><span class="uplive">● NOW</span></div>`;
+  }
+  if(next){
+    const mins=timeInfo(next).s-n;
+    const inTxt=mins<60?`in ${mins}m`:`${fmtClock(timeInfo(next).s)}`;
+    rows+=`<div class="upitem"><span class="uptime">${esc(next.startTime)}</span><span class="uptitle">${esc(next.title)}</span><span class="upin">${esc(inTxt)}</span></div>`;
+  }
+  if(!rows){ rows=`<div class="upmuted">No more starred events today — you're all caught up.</div>`; }
+  el.innerHTML=`<div class="uphead">⭐ Your ${TODAY}</div>${rows}`;
+  el.classList.remove("hide");
+}
+function startUpTimer(){ if(upTimer) return; upTimer=setInterval(()=>{ renderUpNext();
+  if(!document.getElementById("browse").classList.contains("hide")) renderBrowse(); }, 60000); }
 
 /* ---------- camps directory ---------- */
 function renderCamps(){
@@ -570,6 +649,89 @@ function renderTagOptions(){
   sel.value = filter.tag;
 }
 
+/* ---------- map ---------- */
+function idbOpen(){ return new Promise((res,rej)=>{ const r=indexedDB.open("ow-map",1);
+  r.onupgradeneeded=()=>r.result.createObjectStore("blobs"); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+async function idbGet(k){ try{ const db=await idbOpen(); return await new Promise((res,rej)=>{
+  const q=db.transaction("blobs").objectStore("blobs").get(k); q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error); }); }catch(e){ return null; } }
+async function idbPut(k,v){ try{ const db=await idbOpen(); await new Promise((res,rej)=>{
+  const q=db.transaction("blobs","readwrite").objectStore("blobs").put(v,k); q.onsuccess=res; q.onerror=()=>rej(q.error); }); }catch(e){} }
+function setMapHint(t){ const h=document.getElementById("mapHint"); if(h) h.textContent=t; }
+
+async function loadMap(){
+  if(!MAP){ try{ const r=await fetch(MAP_PINS_URL,{cache:"no-store"}); if(r.ok){ const j=await r.json();
+    if(j&&Array.isArray(j.pins)){ MAP=j; save(LS.mappins,j); } } }catch(e){} }
+  buildMapTypeChips(); renderMap(); ensureMapImage();
+}
+async function ensureMapImage(){
+  const img=document.getElementById("mapImg"); if(!img||mapImgReady) return;
+  const hasIDB = (typeof indexedDB!=="undefined");
+  let blob = hasIDB ? await idbGet("map.png") : null;
+  if(blob){ img.src=URL.createObjectURL(blob); mapImgReady=true; setMapHint("Pinch to zoom · tap a pin for details"); return; }
+  if(!navigator.onLine){ setMapHint("Map image needs a connection the first time — connect once and it's saved for offline."); return; }
+  setMapHint("Loading map…");
+  try{
+    const res=await fetch(MAP_IMG_URL,{cache:"force-cache"}); if(!res.ok) throw new Error("HTTP "+res.status);
+    const b=await res.blob(); img.src=URL.createObjectURL(b); mapImgReady=true;
+    setMapHint("Pinch to zoom · tap a pin for details"); if(hasIDB) idbPut("map.png", b);
+  }catch(err){ setMapHint("Couldn't load the map image. Check your connection and reopen this tab."); }
+}
+function buildMapTypeChips(){
+  const el=document.getElementById("mapTypeChips"); if(!el) return;
+  const present = (MAP&&MAP.pins) ? [...new Set(MAP.pins.map(p=>p.type))] : ["camp","sound_stage","art_installation"];
+  el.innerHTML = chip("mtype","all","All","",true) +
+    present.filter(k=>TYPES[k]).map(k=>chip("mtype",k,TYPES[k].short,TYPES[k].color,false)).join("");
+}
+function renderMap(){
+  const pinsEl=document.getElementById("mapPins"); if(!pinsEl) return;
+  if(!MAP||!MAP.pins){ pinsEl.innerHTML=""; setMapHint("Map data not loaded — connect once and reopen this tab."); return; }
+  const favCanon=new Set(); EVENTS.forEach(e=>{ if(FAVS.has(idOf(e))) favCanon.add(canon(e.owner)); });
+  const list=MAP.pins.filter(p=>mapFilter.type==="all"||p.type===mapFilter.type);
+  pinsEl._list=list;
+  pinsEl.innerHTML=list.map((p,i)=>{
+    const c=(TYPES[p.type]||{color:"#888"}).color;
+    const fav=favCanon.has(canon(p.name))?" fav":"";
+    return `<button class="pin${fav}" data-pin="${i}" title="${esc(p.name)}" style="left:${(p.x*100).toFixed(2)}%;top:${(p.y*100).toFixed(2)}%;background:${c}"></button>`;
+  }).join("");
+}
+function selectPin(i){
+  const pinsEl=document.getElementById("mapPins"); const p=(pinsEl._list||[])[i]; if(!p) return;
+  pinsEl.querySelectorAll(".pin").forEach(b=>b.classList.toggle("sel", b.dataset.pin===String(i)));
+  const en=ENTRIES.find(x=>canon(x.name)===canon(p.name));
+  const t=TYPES[p.type]||{short:p.type,icon:"•",color:"#888"};
+  const cnt=en?en.events.length:0;
+  document.getElementById("mapInfo").innerHTML=
+    `<div class="mi-name">${t.icon} ${esc(p.name)}</div>
+     <div class="mi-sub"><span class="tp" style="--type-c:${t.color};--type-bg:${t.color}22">${esc(t.short)}</span>
+       ${en&&en.neighbourhood?`<span>· ${esc(en.neighbourhood)}</span>`:""}<span>· ${cnt} event${cnt!==1?"s":""}</span></div>
+     ${cnt?`<button class="btn ghost" id="miEvents" data-name="${esc(p.name)}">View ${cnt} event${cnt!==1?"s":""} →</button>`
+          :`<div class="muted-note" style="padding:0">No scheduled events listed.</div>`}`;
+  document.getElementById("mapInfo").classList.remove("hide");
+}
+
+/* ---------- share lineup ---------- */
+function lineupText(){
+  const list=EVENTS.filter(e=>FAVS.has(idOf(e))); if(!list.length) return "";
+  let out="🎪 My Otherworld 2026 plan";
+  for(const g of groupByDay(list)){
+    out+=`\n\n${g.day.toUpperCase()}`;
+    for(const e of g.items){ const ti=timeInfo(e);
+      const tm = ti.s==null ? "" : `${e.startTime}${ti.hasEnd?"–"+e.endTime:""}  `;
+      out+=`\n${tm}${e.title} — ${e.owner}`;
+    }
+  }
+  return out + `\n\n(${list.length} picks · made with the Otherworld planner)`;
+}
+async function shareLineup(){
+  const text=lineupText(); if(!text) return toast("Star some events first");
+  if(navigator.share){ try{ await navigator.share({title:"My Otherworld 2026 plan", text}); return; }
+    catch(e){ if(e&&e.name==="AbortError") return; } }
+  try{ await navigator.clipboard.writeText(text); toast("Lineup copied to clipboard ✓"); return; }catch(e){}
+  const blob=new Blob([text],{type:"text/plain"}); const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob); a.download="my-otherworld-lineup.txt"; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000); toast("Saved lineup as a text file");
+}
+
 /* ---------- chips ---------- */
 const TOD = [["morning","🌅 Morning"],["afternoon","☀️ Afternoon"],["evening","🌆 Evening"],["late","🌙 Late night"]];
 function buildChips(){
@@ -611,9 +773,10 @@ function renderSettingsStats(){
 /* ---------- tabs ---------- */
 function showTab(name){
   document.querySelectorAll("nav.tabs button").forEach(b=>b.classList.toggle("active", b.dataset.tab===name));
-  for(const s of ["browse","camps","mine","settings"]) document.getElementById(s).classList.toggle("hide", s!==name);
+  for(const s of ["browse","camps","map","mine","settings"]) document.getElementById(s).classList.toggle("hide", s!==name);
   if(name==="settings") renderSettingsStats();
   if(name==="camps") renderCamps();
+  if(name==="map") loadMap();
   if(name==="mine") renderMine();
   window.scrollTo(0,0);
 }
@@ -636,6 +799,7 @@ function wire(){
     if(chip){ const k=chip.dataset.kind, v=chip.dataset.val;
       chip.parentElement.querySelectorAll(".chip").forEach(c=>c.classList.toggle("active", c===chip));
       if(k==="ctype"){ campFilter.type=v; renderCamps(); return; }
+      if(k==="mtype"){ mapFilter.type=v; renderMap(); return; }
       if(k==="now"){ filter.now=true; filter.day="all"; }
       else if(k==="day"){ filter.now=false; filter.day=v; }
       else if(k==="type"){ filter.type=v; }
@@ -653,17 +817,31 @@ function wire(){
       }
       return; }
 
+    const pin=e.target.closest(".pin");
+    if(pin){ selectPin(+pin.dataset.pin); return; }
+
+    const mi=e.target.closest("#miEvents");
+    if(mi){ const name=mi.dataset.name; campFilter.q=name.toLowerCase();
+      const cs=document.getElementById("campSearch"); if(cs) cs.value=name;
+      showTab("camps"); renderCamps();
+      setTimeout(()=>{ const card=[...document.querySelectorAll(".camp")].find(c=>{ const en=ENTRIES[+c.dataset.i]; return en&&canon(en.name)===canon(name); });
+        if(card){ const head=card.querySelector(".camp-head"); if(head) head.click(); card.scrollIntoView({block:"start"}); } },40);
+      return; }
+
     const star=e.target.closest("[data-star]");
     if(star){ const id=star.dataset.star;
       if(FAVS.has(id)){ FAVS.delete(id); } else { FAVS.add(id); }
       saveFavs();
-      // update this star + mirror across both lists
+      // update this star + mirror across all lists
       document.querySelectorAll(`[data-star="${cssEsc(id)}"]`).forEach(b=>{
         const on=FAVS.has(id); b.classList.toggle("on",on); b.textContent=on?"★":"☆";
       });
+      renderUpNext();
       if(!document.getElementById("mine").classList.contains("hide")) renderMine();
+      if(!document.getElementById("map").classList.contains("hide")) renderMap();
       return; }
 
+    if(e.target.closest("#shareBtn")){ shareLineup(); return; }
     if(e.target.closest("#icsBtn")){ exportICS(); return; }
 
     const ev=e.target.closest(".ev");
@@ -750,7 +928,7 @@ function boot(){
   buildChips(); wire();
   const cached = load(LS.data, null);
   if(cached && Array.isArray(cached.entries)){ ingest(cached); }
-  renderAll(); renderSettingsStats();
+  renderAll(); renderSettingsStats(); startUpTimer();
   // refresh in background if online
   if(navigator.onLine) fetchData(false);
   else if(!EVENTS.length) toast("Offline — connect once to load the schedule");
