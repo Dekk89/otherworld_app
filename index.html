@@ -428,6 +428,29 @@ const TYPE_OVERRIDES = {
   [canon("The Cottage")]: "sound_stage",
   [canon("Bass House Brunch Bunch")]: "sound_stage",
 };
+// The source feed has duplicate entries for one real place — typically an empty "stage"
+// shadowing the entry that actually holds the events. Fold the duplicate(s) into the
+// surviving entry (the one with the events) and type it correctly.
+const MERGE_GROUPS = [
+  { keep:"CLuG",            type:"sound_stage", fold:["CLuG (Cyber Love Garden)"] },
+  { keep:"Electric Circus", type:"sound_stage", fold:["Electric Circus / Tabula Rasa"] },
+  { keep:"Tune Town Stage", type:"sound_stage", fold:["Thirrrsty Barrr Tune Town Stage"] },
+];
+function applyMerges(norm){
+  const drop=new Set();
+  for(const g of MERGE_GROUPS){
+    const keep=norm.find(en=>canon(en.name)===canon(g.keep)); if(!keep) continue;
+    for(const fname of g.fold){
+      const src=norm.find(en=>canon(en.name)===canon(fname)); if(!src||src===keep) continue;
+      keep.events.push(...src.events); drop.add(src);
+    }
+    keep.type=g.type;
+    const seen=new Set();
+    keep.events=keep.events.filter(e=>{ const id=idOf(e); if(seen.has(id)) return false; seen.add(id); return true; });
+    keep.events.forEach(e=>{ e.ownerType=g.type; }); keep.events.sort(byTime);
+  }
+  return norm.filter(en=>!drop.has(en));
+}
 const byTime = (a,b)=> dayIdx(a.day)-dayIdx(b.day) || (toMin(a.startTime)??1e9)-(toMin(b.startTime)??1e9) || a.title.localeCompare(b.title);
 function ingest(json){
   const entries = (json && json.entries) || [];
@@ -455,10 +478,11 @@ function ingest(json){
     norm.push({ name: en.name||"(unnamed)", type: enType, neighbourhood: en.neighbourhood||"", claimed, events: evs });
   }
   norm.sort((a,b)=> a.name.localeCompare(b.name, undefined, {sensitivity:"base"}));
-  norm.forEach((en,i)=> en._i=i);
-  ENTRIES = norm;
-  ENTRY_TYPE = {}; norm.forEach(en=>{ ENTRY_TYPE[canon(en.name)] = en.type; });
-  EVENTS = norm.flatMap(en=>en.events).sort(byTime);
+  const merged = applyMerges(norm);
+  merged.forEach((en,i)=> en._i=i);
+  ENTRIES = merged;
+  ENTRY_TYPE = {}; merged.forEach(en=>{ ENTRY_TYPE[canon(en.name)] = en.type; });
+  EVENTS = merged.flatMap(en=>en.events).sort(byTime);
   return { count: EVENTS.length, sourceUpdated: json && json.metadata && (json.metadata.lastReconciledAt || json.metadata.extractedAt) };
 }
 
