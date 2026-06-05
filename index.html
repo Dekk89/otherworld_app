@@ -232,6 +232,11 @@
     display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
   .gblock.fav{box-shadow:0 0 0 2px var(--star),0 0 8px #fbbf2455}
   .gblock:active{filter:brightness(1.25)}
+  .gtrack.gempty{background-color:#ffffff04}
+  .gridnow{position:absolute;top:28px;bottom:0;width:2px;background:#ef4444;z-index:3;
+    pointer-events:none;box-shadow:0 0 6px #ef4444}
+  .gridnow::before{content:"now";position:sticky;top:28px;display:block;margin-left:-15px;
+    background:#ef4444;color:#fff;font-size:9px;font-weight:700;padding:1px 4px;border-radius:0 0 5px 5px;width:max-content}
   .gridhint{font-size:12px;color:var(--faint);margin-top:8px;text-align:center}
 </style>
 </head>
@@ -721,7 +726,8 @@ function renderUpNext(){
   el.classList.remove("hide");
 }
 function startUpTimer(){ if(upTimer) return; upTimer=setInterval(()=>{ renderUpNext();
-  if(!document.getElementById("browse").classList.contains("hide")) renderBrowse(); }, 60000); }
+  if(!document.getElementById("browse").classList.contains("hide")) renderBrowse();
+  if(!document.getElementById("grid").classList.contains("hide")) updateGridNow(false); }, 60000); }
 
 /* ---------- camps directory ---------- */
 function renderCamps(){
@@ -836,15 +842,19 @@ function selectPin(i){
 }
 
 /* ---------- stage timetable grid ---------- */
-const GRID = { LABEL_W:92, PXM:2.4, LANE_H:48 };   // PXM*30 must equal the 72px CSS gridline
+const GRID = { LABEL_W:92, PXM:2.4, LANE_H:48, HEAD_H:28 };   // PXM*30 must equal the 72px CSS gridline
+let gridState = null;             // {axisStart, axisEnd, isToday} for the live "now" line
 function hueFromStr(s){ let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0; return h%360; }
 function fmtClock(min){ const m=((min%1440)+1440)%1440; return pad(Math.floor(m/60))+":"+pad(m%60); }
 function renderGrid(){
   const inner=document.getElementById("gridInner"); if(!inner) return;
   const stageEvents=EVENTS.filter(e=>e.ownerType==="sound_stage" && timeInfo(e).s!=null);
   const dayChips=document.getElementById("gridDayChips");
-  if(!stageEvents.length){
-    dayChips.innerHTML=""; document.getElementById("gridInfo").classList.add("hide");
+  // every stage gets a row on every day — even when it has no set that day
+  const allStages=[...new Set(ENTRIES.filter(en=>en.type==="sound_stage" && en.events.length).map(en=>en.name))]
+    .sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:"base"}));
+  if(!stageEvents.length || !allStages.length){
+    gridState=null; dayChips.innerHTML=""; document.getElementById("gridInfo").classList.add("hide");
     inner.style.width=""; inner.innerHTML=`<div class="empty"><div class="big">▦</div><h3>No stage sets loaded</h3>
       <p>Connect once and refresh to load the schedule, then the stage timetable appears here.</p></div>`;
     return;
@@ -856,18 +866,19 @@ function renderGrid(){
   const dayEvents=stageEvents.filter(e=>e.day===gridDay);
   let minS=Infinity, maxE=-Infinity;
   dayEvents.forEach(e=>{ const ti=timeInfo(e); minS=Math.min(minS,ti.s); maxE=Math.max(maxE,ti.endAbs); });
-  const axisStart=Math.floor(minS/30)*30, axisEnd=Math.ceil(maxE/30)*30;
+  if(!isFinite(minS)){ minS=600; maxE=1560; }              // empty day → default 10:00–02:00 window
+  let axisStart=Math.floor(minS/30)*30, axisEnd=Math.ceil(maxE/30)*30;
+  if(gridDay===TODAY){ const n=nowMin(); if(n>=axisStart-30 && n<=axisEnd+30){ axisStart=Math.min(axisStart,Math.floor(n/30)*30); axisEnd=Math.max(axisEnd,Math.ceil(n/30)*30); } }
   const axisW=Math.max((axisEnd-axisStart)*GRID.PXM, 240);
 
   const byStage={}; dayEvents.forEach(e=>{ (byStage[e.owner]||(byStage[e.owner]=[])).push(e); });
-  const stages=Object.keys(byStage).sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:"base"}));
 
   let ticks="";
   for(let m=axisStart;m<=axisEnd;m+=30){ ticks+=`<div class="gtick" style="left:${((m-axisStart)*GRID.PXM).toFixed(1)}px">${fmtClock(m)}</div>`; }
   let html=`<div class="grow ghead"><div class="glabel gcorner">Stage</div><div class="gtrack gticks" style="width:${axisW.toFixed(0)}px">${ticks}</div></div>`;
 
-  for(const st of stages){
-    const evs=byStage[st].slice().sort((a,b)=>timeInfo(a).s-timeInfo(b).s);
+  for(const st of allStages){
+    const evs=(byStage[st]||[]).slice().sort((a,b)=>timeInfo(a).s-timeInfo(b).s);
     const laneEnds=[];
     const placed=evs.map(e=>{ const ti=timeInfo(e); let lane=laneEnds.findIndex(end=>end<=ti.s);
       if(lane<0) lane=laneEnds.length; laneEnds[lane]=ti.endAbs; return {e,ti,lane}; });
@@ -880,10 +891,24 @@ function renderGrid(){
       blocks+=`<button class="gblock${fav}" data-eid="${esc(id)}" style="left:${left.toFixed(1)}px;width:${w.toFixed(0)}px;top:${(lane*GRID.LANE_H+2)}px;height:${GRID.LANE_H-6}px;background:hsl(${hue} 42% 25%);border-color:hsl(${hue} 48% 42%)">`
         + `<div class="bt">${esc(e.startTime)}${endLbl}</div><div class="bn">${esc(e.title)}</div></button>`;
     }
-    html+=`<div class="grow"><div class="glabel">${esc(st)}</div><div class="gtrack" style="width:${axisW.toFixed(0)}px;height:${rowH}px">${blocks}</div></div>`;
+    html+=`<div class="grow"><div class="glabel">${esc(st)}</div><div class="gtrack${evs.length?"":" gempty"}" style="width:${axisW.toFixed(0)}px;height:${rowH}px">${blocks}</div></div>`;
   }
+  html+=`<div class="gridnow" id="gridNow" style="display:none"></div>`;
   inner.style.width=(GRID.LABEL_W+axisW)+"px";
   inner.innerHTML=html;
+  gridState={ axisStart, axisEnd, isToday: gridDay===TODAY };
+  updateGridNow(true);
+}
+// the live "now" vertical line — only on today's column, repositioned each minute
+function updateGridNow(scroll){
+  const el=document.getElementById("gridNow"); if(!el||!gridState) return;
+  const n=nowMin();
+  if(gridState.isToday && n>=gridState.axisStart && n<=gridState.axisEnd){
+    const left=GRID.LABEL_W+(n-gridState.axisStart)*GRID.PXM;
+    el.style.left=left.toFixed(1)+"px"; el.style.display="block";
+    if(scroll){ const sc=document.getElementById("gridScroll");
+      if(sc) sc.scrollLeft=Math.max(0, left-GRID.LABEL_W-100); }
+  } else el.style.display="none";
 }
 function selectGridEvent(id){
   const e=EVENTS.find(x=>idOf(x)===id); if(!e) return;
