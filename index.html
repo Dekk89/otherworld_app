@@ -258,6 +258,7 @@
   <!-- MAP -->
   <section id="map" class="hide">
     <div class="chips" id="mapTypeChips"></div>
+    <div class="filterbar"><button class="favtoggle" id="mapFavToggle" aria-pressed="false">☆ Starred only</button></div>
     <div id="mapInfo" class="mapinfo hide"></div>
     <div class="mapwrap" id="mapWrap">
       <div class="mapstage" id="mapStage">
@@ -346,7 +347,7 @@ let campFilter = { type:"all", q:"" };
 let mineDay = "all";
 let currentTab = "browse";
 let MAP = load(LS.mappins, null);   // {pageWidth,pageHeight,pins:[...]}
-let mapFilter = { type:"all" };
+let mapFilter = { type:"all", fav:false };
 let mapImgReady = false;
 let upTimer = null;
 const canon = s => String(s||"").toLowerCase().normalize("NFKD").replace(/[^a-z0-9]/g,"");
@@ -723,13 +724,17 @@ function renderMap(){
   const pinsEl=document.getElementById("mapPins"); if(!pinsEl) return;
   if(!MAP||!MAP.pins){ pinsEl.innerHTML=""; setMapHint("Map data not loaded — connect once and reopen this tab."); return; }
   const favCanon=new Set(); EVENTS.forEach(e=>{ if(FAVS.has(idOf(e))) favCanon.add(canon(e.owner)); });
-  const list=MAP.pins.filter(p=>mapFilter.type==="all"||p.type===mapFilter.type);
+  const list=MAP.pins.filter(p=>(mapFilter.type==="all"||p.type===mapFilter.type)
+    && (!mapFilter.fav || favCanon.has(canon(p.name))));
   pinsEl._list=list;
   pinsEl.innerHTML=list.map((p,i)=>{
     const c=(TYPES[p.type]||{color:"#888"}).color;
     const fav=favCanon.has(canon(p.name))?" fav":"";
     return `<button class="pin${fav}" data-pin="${i}" title="${esc(p.name)}" style="left:${(p.x*100).toFixed(2)}%;top:${(p.y*100).toFixed(2)}%;background:${c}"></button>`;
   }).join("");
+  if(mapFilter.fav && !list.length)
+    setMapHint(favCanon.size ? "None of your starred camps are on the map." : "Star some camps first, then flip this on.");
+  else setMapHint("Pinch to zoom · tap a pin for details");
 }
 function selectPin(i){
   const pinsEl=document.getElementById("mapPins"); const p=(pinsEl._list||[])[i]; if(!p) return;
@@ -868,6 +873,10 @@ function wire(){
     const b=document.getElementById("favToggle");
     b.classList.toggle("on",filter.fav); b.setAttribute("aria-pressed",filter.fav);
     b.textContent=(filter.fav?"★":"☆")+" Starred only"; renderBrowse(); saveUI(); };
+  document.getElementById("mapFavToggle").onclick=()=>{ mapFilter.fav=!mapFilter.fav;
+    const b=document.getElementById("mapFavToggle");
+    b.classList.toggle("on",mapFilter.fav); b.setAttribute("aria-pressed",mapFilter.fav);
+    b.textContent=(mapFilter.fav?"★":"☆")+" Starred only"; renderMap(); };
   const cs=document.getElementById("campSearch"); let ct;
   cs.oninput=()=>{ clearTimeout(ct); ct=setTimeout(()=>{ campFilter.q=cs.value.trim().toLowerCase(); renderCamps(); },150); };
 
