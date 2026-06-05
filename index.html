@@ -409,18 +409,26 @@ function toast(msg){ const el=document.getElementById("toast"); el.textContent=m
   clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove("show"),2200); }
 
 /* ---------- data ingest ---------- */
+// Some music stages are filed as "camp" in the source feed but are really stages
+// (they appear as stage tabs on the official site). Re-wire them here, keyed by
+// canonical name so it survives the live data refreshes.
+const TYPE_OVERRIDES = {
+  [canon("The Cottage")]: "sound_stage",
+  [canon("Bass House Brunch Bunch")]: "sound_stage",
+};
 const byTime = (a,b)=> dayIdx(a.day)-dayIdx(b.day) || (toMin(a.startTime)??1e9)-(toMin(b.startTime)??1e9) || a.title.localeCompare(b.title);
 function ingest(json){
   const entries = (json && json.entries) || [];
   const norm = [];
   for(const en of entries){
     const claimed = !!en.claimed;
+    const enType = TYPE_OVERRIDES[canon(en.name)] || en.type || "camp";
     const evs = [];
     for(const e of (en.events||[])){
       if(!e || !e.title) continue;
       evs.push({
         owner: e.owner || en.name,
-        ownerType: e.ownerType || en.type || "camp",
+        ownerType: TYPE_OVERRIDES[canon(e.owner || en.name)] || e.ownerType || en.type || "camp",
         title: e.title,
         description: e.description || "",
         day: e.day || "",
@@ -432,7 +440,7 @@ function ingest(json){
       });
     }
     evs.sort(byTime);
-    norm.push({ name: en.name||"(unnamed)", type: en.type||"camp", neighbourhood: en.neighbourhood||"", claimed, events: evs });
+    norm.push({ name: en.name||"(unnamed)", type: enType, neighbourhood: en.neighbourhood||"", claimed, events: evs });
   }
   norm.sort((a,b)=> a.name.localeCompare(b.name, undefined, {sensitivity:"base"}));
   norm.forEach((en,i)=> en._i=i);
@@ -728,7 +736,7 @@ function renderMap(){
     && (!mapFilter.fav || favCanon.has(canon(p.name))));
   pinsEl._list=list;
   pinsEl.innerHTML=list.map((p,i)=>{
-    const c=(TYPES[p.type]||{color:"#888"}).color;
+    const c=(TYPES[TYPE_OVERRIDES[canon(p.name)]||p.type]||{color:"#888"}).color;
     const fav=favCanon.has(canon(p.name))?" fav":"";
     return `<button class="pin${fav}" data-pin="${i}" title="${esc(p.name)}" style="left:${(p.x*100).toFixed(2)}%;top:${(p.y*100).toFixed(2)}%;background:${c}"></button>`;
   }).join("");
@@ -740,7 +748,7 @@ function selectPin(i){
   const pinsEl=document.getElementById("mapPins"); const p=(pinsEl._list||[])[i]; if(!p) return;
   pinsEl.querySelectorAll(".pin").forEach(b=>b.classList.toggle("sel", b.dataset.pin===String(i)));
   const en=ENTRIES.find(x=>canon(x.name)===canon(p.name));
-  const t=TYPES[p.type]||{short:p.type,icon:"•",color:"#888"};
+  const t=TYPES[TYPE_OVERRIDES[canon(p.name)]||p.type]||{short:p.type,icon:"•",color:"#888"};
   const cnt=en?en.events.length:0;
   document.getElementById("mapInfo").innerHTML=
     `<div class="mi-name">${t.icon} ${esc(p.name)}</div>
