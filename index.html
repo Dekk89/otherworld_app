@@ -204,6 +204,10 @@
   .favtoggle.on{background:linear-gradient(135deg,#3a2f0a,#4a3a0c);border-color:var(--star);color:var(--star)}
   .gap{margin:7px 0 7px 4px;padding:5px 12px;font-size:12px;color:var(--faint);
     border-left:2px dashed var(--line);font-weight:600}
+  .noteline{margin-top:7px}
+  .notebtn{background:#ffffff08;border:1px dashed var(--line);color:var(--muted);border-radius:8px;
+    padding:4px 9px;font-size:12px;font-weight:600;text-align:left;max-width:100%;white-space:normal;line-height:1.35}
+  .notebtn.on{border-style:solid;border-color:var(--star);color:var(--star);background:#fbbf2412}
 </style>
 </head>
 <body>
@@ -321,7 +325,7 @@ const DEFAULT_URL = "https://raw.githubusercontent.com/Isaiiaas/OtherworldWWW/ma
 const RAW_BASE = DEFAULT_URL.replace(/\/[^/]*$/, "");
 const MAP_PINS_URL = RAW_BASE + "/map-locations.json";
 const MAP_IMG_URL  = RAW_BASE + "/map.png";
-const LS = { data:"ow:data", meta:"ow:meta", favs:"ow:favs", settings:"ow:settings", mappins:"ow:mappins" };
+const LS = { data:"ow:data", meta:"ow:meta", favs:"ow:favs", settings:"ow:settings", mappins:"ow:mappins", notes:"ow:notes", ui:"ow:ui" };
 const DAY_ORDER = ["Thursday","Friday","Saturday","Sunday","Monday"];
 const DAY_SHORT = { Thursday:"Thu", Friday:"Fri", Saturday:"Sat", Sunday:"Sun", Monday:"Mon" };
 const TYPES = {
@@ -335,10 +339,12 @@ const TYPES = {
 let EVENTS = [];                 // flattened events
 let ENTRIES = [];                // camps / stages / art / vehicles (each with .events)
 let FAVS = new Set(load(LS.favs, []));
+let NOTES = load(LS.notes, {});           // { eventId: "note text" }
 let SETTINGS = load(LS.settings, { url: DEFAULT_URL });
 let filter = { type:"all", day:"all", timeOfDay:"all", tag:"all", q:"", now:false, fav:false };
 let campFilter = { type:"all", q:"" };
 let mineDay = "all";
+let currentTab = "browse";
 let MAP = load(LS.mappins, null);   // {pageWidth,pageHeight,pins:[...]}
 let mapFilter = { type:"all" };
 let mapImgReady = false;
@@ -349,6 +355,10 @@ const canon = s => String(s||"").toLowerCase().normalize("NFKD").replace(/[^a-z0
 function load(k, fb){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):fb; }catch(e){ return fb; } }
 function save(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){ toast("Storage full — couldn't save"); } }
 function saveFavs(){ save(LS.favs, [...FAVS]); refreshCounts(); }
+function noteOf(id){ return NOTES[id]||""; }
+function saveNotes(){ save(LS.notes, NOTES); }
+function saveUI(){ save(LS.ui, { tab:currentTab, mineDay,
+  filter:{ type:filter.type, day:filter.day, timeOfDay:filter.timeOfDay, tag:filter.tag, fav:filter.fav, now:filter.now } }); }
 
 /* ---------- utilities ---------- */
 const esc = s => (s==null?"":String(s)).replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
@@ -479,6 +489,7 @@ function eventCard(e, extra){
   const t = TYPES[e.ownerType] || { short:e.ownerType, icon:"•", color:"#888" };
   const id = idOf(e);
   const on = FAVS.has(id);
+  const note = noteOf(id);
   const ti = timeInfo(e);
   const time = ti.s==null ? "—" : `${esc(e.startTime)}${ti.hasEnd?`<br><span class="end">${esc(e.endTime)}${ti.endsNextDay?'<span class="plus">+1</span>':''}</span>`:''}`;
   const tags = e.tags.slice(0,6).map(t=>`<span class="tag">${esc(t)}</span>`).join("");
@@ -499,6 +510,7 @@ function eventCard(e, extra){
         </div>
         ${tags?`<div class="tags">${tags}</div>`:""}
         ${hasDesc?`<span class="more">＋ details</span><div class="desc">${esc(e.description)}</div>`:""}
+        <div class="noteline"><button class="notebtn ${note?"on":""}" data-note="${esc(id)}">📝 ${note?esc(note):"Add note"}</button></div>
       </div>
       <button class="star ${on?"on":""}" data-star="${esc(id)}" aria-label="favourite">${on?"★":"☆"}</button>
     </div>
@@ -735,6 +747,20 @@ function selectPin(i){
 }
 
 /* ---------- share lineup ---------- */
+function editNote(id){
+  const ev=EVENTS.find(x=>idOf(x)===id);
+  const cur=noteOf(id);
+  const v=prompt(`Note for “${ev?ev.title:"this event"}”:`, cur);
+  if(v===null) return;                       // cancelled
+  const t=v.trim();
+  if(t) NOTES[id]=t; else delete NOTES[id];
+  saveNotes();
+  document.querySelectorAll(`[data-note="${cssEsc(id)}"]`).forEach(b=>{
+    const n=noteOf(id); b.classList.toggle("on", !!n); b.innerHTML = "📝 " + (n?esc(n):"Add note");
+  });
+  if(!document.getElementById("mine").classList.contains("hide")) renderMine();
+  toast(t?"Note saved":"Note removed");
+}
 function lineupText(){
   const list=EVENTS.filter(e=>FAVS.has(idOf(e))); if(!list.length) return "";
   let out="🎪 My Otherworld 2026 plan";
@@ -743,6 +769,7 @@ function lineupText(){
     for(const e of g.items){ const ti=timeInfo(e);
       const tm = ti.s==null ? "" : `${e.startTime}${ti.hasEnd?"–"+e.endTime:""}  `;
       out+=`\n${tm}${e.title} — ${e.owner}`;
+      const nt=noteOf(idOf(e)); if(nt) out+=`\n   📝 ${nt}`;
     }
   }
   return out + `\n\n(${list.length} picks · made with the Otherworld planner)`;
@@ -797,6 +824,7 @@ function renderSettingsStats(){
 
 /* ---------- tabs ---------- */
 function showTab(name){
+  currentTab=name;
   document.querySelectorAll("nav.tabs button").forEach(b=>b.classList.toggle("active", b.dataset.tab===name));
   for(const s of ["browse","camps","map","mine","settings"]) document.getElementById(s).classList.toggle("hide", s!==name);
   if(name==="settings") renderSettingsStats();
@@ -804,6 +832,26 @@ function showTab(name){
   if(name==="map") loadMap();
   if(name==="mine") renderMine();
   window.scrollTo(0,0);
+  saveUI();
+}
+// reflect the (possibly restored) filter state onto the chips/controls
+function syncUI(){
+  const set=(cid,val)=>{ const c=document.getElementById(cid); if(c) c.querySelectorAll(".chip").forEach(ch=>ch.classList.toggle("active", ch.dataset.val===val)); };
+  set("typeChips", filter.type);
+  set("dayChips", filter.now ? "now" : filter.day);
+  set("todChips", filter.timeOfDay);
+  const ts=document.getElementById("tagSel"); if(ts) ts.value=filter.tag;
+  const fb=document.getElementById("favToggle"); if(fb){ fb.classList.toggle("on",filter.fav);
+    fb.setAttribute("aria-pressed",filter.fav); fb.textContent=(filter.fav?"★":"☆")+" Starred only"; }
+}
+function restoreUI(){
+  const ui=load(LS.ui,null); if(!ui) return "browse";
+  const f=ui.filter||{};
+  filter.type=f.type||"all"; filter.day=f.day||"all"; filter.timeOfDay=f.timeOfDay||"all";
+  filter.tag=f.tag||"all"; filter.fav=!!f.fav; filter.now=!!f.now;
+  if(filter.now && !TODAY){ filter.now=false; filter.day="all"; }
+  if(ui.mineDay) mineDay=ui.mineDay;
+  return ui.tab||"browse";
 }
 
 /* ---------- events / wiring ---------- */
@@ -815,11 +863,11 @@ function wire(){
 
   const s=document.getElementById("search"); let st;
   s.oninput=()=>{ clearTimeout(st); st=setTimeout(()=>{ filter.q=s.value.trim().toLowerCase(); renderBrowse(); },150); };
-  document.getElementById("tagSel").onchange=ev=>{ filter.tag=ev.target.value; renderBrowse(); };
+  document.getElementById("tagSel").onchange=ev=>{ filter.tag=ev.target.value; renderBrowse(); saveUI(); };
   document.getElementById("favToggle").onclick=()=>{ filter.fav=!filter.fav;
     const b=document.getElementById("favToggle");
     b.classList.toggle("on",filter.fav); b.setAttribute("aria-pressed",filter.fav);
-    b.textContent=(filter.fav?"★":"☆")+" Starred only"; renderBrowse(); };
+    b.textContent=(filter.fav?"★":"☆")+" Starred only"; renderBrowse(); saveUI(); };
   const cs=document.getElementById("campSearch"); let ct;
   cs.oninput=()=>{ clearTimeout(ct); ct=setTimeout(()=>{ campFilter.q=cs.value.trim().toLowerCase(); renderCamps(); },150); };
 
@@ -829,12 +877,12 @@ function wire(){
       chip.parentElement.querySelectorAll(".chip").forEach(c=>c.classList.toggle("active", c===chip));
       if(k==="ctype"){ campFilter.type=v; renderCamps(); return; }
       if(k==="mtype"){ mapFilter.type=v; renderMap(); return; }
-      if(k==="mday"){ mineDay=v; renderMine(); return; }
+      if(k==="mday"){ mineDay=v; renderMine(); saveUI(); return; }
       if(k==="now"){ filter.now=true; filter.day="all"; }
       else if(k==="day"){ filter.now=false; filter.day=v; }
       else if(k==="type"){ filter.type=v; }
       else if(k==="tod"){ filter.timeOfDay=v; }
-      renderBrowse(); return; }
+      renderBrowse(); saveUI(); return; }
 
     const ch=e.target.closest(".camp-head");
     if(ch){ const camp=ch.parentElement, body=camp.querySelector(".camp-events");
@@ -871,6 +919,9 @@ function wire(){
       if(!document.getElementById("map").classList.contains("hide")) renderMap();
       if(filter.fav && !document.getElementById("browse").classList.contains("hide")) renderBrowse();
       return; }
+
+    const noteBtn=e.target.closest("[data-note]");
+    if(noteBtn){ editNote(noteBtn.dataset.note); return; }
 
     if(e.target.closest("#shareBtn")){ shareLineup(); return; }
     if(e.target.closest("#icsBtn")){ exportICS(); return; }
@@ -934,7 +985,8 @@ function exportICS(){
     const date=FESTIVAL_DATES[e.day], ti=timeInfo(e), s=ti.s, en=ti.endAbs;
     const t=TYPES[e.ownerType]||{label:e.ownerType};
     const loc=[e.owner,e.neighbourhood].filter(Boolean).join(" · ");
-    const desc=[`${t.label||t.short||""} — ${e.owner}`, e.description].filter(Boolean).join("\n\n");
+    const note=noteOf(idOf(e));
+    const desc=[`${t.label||t.short||""} — ${e.owner}`, e.description, note?("📝 "+note):""].filter(Boolean).join("\n\n");
     L.push("BEGIN:VEVENT");
     L.push("UID:"+icsEsc(idOf(e)).replace(/\s+/g,"-").slice(0,140)+"@otherworld-planner");
     L.push("DTSTAMP:"+stamp);
@@ -957,9 +1009,12 @@ function exportICS(){
 /* ---------- boot ---------- */
 function boot(){
   buildChips(); wire();
+  const startTab = restoreUI();
   const cached = load(LS.data, null);
   if(cached && Array.isArray(cached.entries)){ ingest(cached); }
+  syncUI();
   renderAll(); renderSettingsStats(); startUpTimer();
+  showTab(startTab);
   // refresh in background if online
   if(navigator.onLine) fetchData(false);
   else if(!EVENTS.length) toast("Offline — connect once to load the schedule");
